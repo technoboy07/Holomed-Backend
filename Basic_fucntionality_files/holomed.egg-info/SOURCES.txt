@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+setup.py
+core/__init__.py
+core/config.py
+core/state.py
+holomed.egg-info/PKG-INFO
+holomed.egg-info/SOURCES.txt
+holomed.egg-info/dependency_links.txt
+holomed.egg-info/entry_points.txt
+holomed.egg-info/requires.txt
+holomed.egg-info/top_level.txt
