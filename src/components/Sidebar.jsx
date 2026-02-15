@@ -1,17 +1,11 @@
-export default function Sidebar({ models, onSelectModel, selectedModel, loading }) {
-  // Fallback to default models if no backend models available
-  const defaultModels = [
-    { id: 'default', name: "Brain Model", file_format: 'stl' }
-  ];
-
-  const displayModels = models && models.length > 0 ? models : defaultModels;
+export default function Sidebar({ models, onSelectModel, selectedModel }) {
+  // Show locally loaded models
+  const displayModels = models || [];
 
   return (
     <aside className="sidebar">
       <h4>3D Models</h4>
-      {loading ? (
-        <div style={{ color: '#778da9', padding: '10px' }}>Loading models...</div>
-      ) : (
+      {displayModels.length > 0 ? (
         <ul>
           {displayModels.map((model) => (
             <li
@@ -20,7 +14,7 @@ export default function Sidebar({ models, onSelectModel, selectedModel, loading 
               onClick={() => onSelectModel(model)}
               style={{ cursor: 'pointer' }}
             >
-              {model.name || model.file}
+              {model.name}
               {model.file_size && (
                 <span style={{ fontSize: '11px', color: '#778da9', display: 'block', marginTop: '4px' }}>
                   {(model.file_size / 1024 / 1024).toFixed(2)} MB
@@ -29,10 +23,9 @@ export default function Sidebar({ models, onSelectModel, selectedModel, loading 
             </li>
           ))}
         </ul>
-      )}
-      {models && models.length === 0 && !loading && (
+      ) : (
         <div style={{ color: '#778da9', padding: '10px', fontSize: '12px' }}>
-          No models uploaded yet. Click "+ Add Model" to upload.
+          No models loaded yet. Click "+ Add Model" to load a 3D model from your computer.
         </div>
       )}
     </aside>

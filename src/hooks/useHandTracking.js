@@ -95,36 +95,54 @@ export function useHandTracking(onGestureDetected) {
     
     setIsEnabled(true);
 
-    const hands = new Hands({
-      locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-      }
-    });
-
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 0,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7
-    });
-
-    hands.onResults((results) => {
-      processHandGestures(results);
-    });
-
-    const camera = new Camera(videoRef.current, {
-      onFrame: async () => {
-        if (videoRef.current && videoRef.current.videoWidth > 0) {
-          await hands.send({ image: videoRef.current });
+    try {
+      const hands = new Hands({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         }
-      },
-      width: 640,
-      height: 480
-    });
-    
-    camera.start();
-    handsRef.current = hands;
-    cameraRef.current = camera;
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 0,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      hands.onResults((results) => {
+        processHandGestures(results);
+      });
+
+      const camera = new Camera(videoRef.current, {
+        onFrame: async () => {
+          if (videoRef.current && videoRef.current.videoWidth > 0) {
+            try {
+              await hands.send({ image: videoRef.current });
+            } catch (error) {
+              console.error('Error sending frame to hands:', error);
+            }
+          }
+        },
+        width: 640,
+        height: 480
+      });
+      
+      // Camera.start() might return a promise or throw synchronously
+      const startResult = camera.start();
+      if (startResult && typeof startResult.catch === 'function') {
+        startResult.catch((error) => {
+          console.error('Camera start failed:', error);
+          setIsEnabled(false);
+          // Don't show alert immediately, let user see the error in console
+        });
+      }
+      
+      handsRef.current = hands;
+      cameraRef.current = camera;
+    } catch (error) {
+      console.error('Hand tracking initialization failed:', error);
+      setIsEnabled(false);
+    }
   }, [isEnabled, processHandGestures]);
 
   const disableTracking = useCallback(() => {

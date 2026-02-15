@@ -18,16 +18,35 @@ function getLoader(format) {
 }
 
 function Model({ transform, modelPath, modelFormat }) {
+  // For local files, modelPath is already a blob URL - no need for authentication
+  // Only load if we have a valid path
+  if (!modelPath || modelPath === '' || modelPath === 'undefined') {
+    return (
+      <mesh
+        rotation={[transform.pitch * Math.PI / 180, transform.yaw * Math.PI / 180, 0]}
+        scale={[transform.scale, transform.scale, transform.scale]}
+      >
+        <boxGeometry args={[2, 2, 2]} />
+        <meshStandardMaterial color="#888888" roughness={0.3} metalness={0.2} />
+      </mesh>
+    );
+  }
+
   const loader = getLoader(modelFormat);
   
-  // useLoader must be called unconditionally, so we use error boundaries
-  // For now, we'll load the model and handle errors in the geometry extraction
-  const modelData = useLoader(loader, modelPath, undefined, (error) => {
-    console.error("Error loading model:", error);
-  });
+  // useLoader MUST be called unconditionally
+  const modelData = useLoader(
+    loader, 
+    modelPath, 
+    undefined, 
+    (error) => {
+      console.error("Error loading model:", error);
+    }
+  );
 
   // Handle different loader return types
   const geometry = useMemo(() => {
+    
     try {
       if (modelFormat === 'gltf' || modelFormat === 'glb') {
         // GLTFLoader returns a scene, extract the first mesh
@@ -156,17 +175,29 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
         <pointLight position={[10, 10, 10]} />
         <pointLight position={[-10, -10, -10]} intensity={0.3} />
 
-        <Suspense fallback={null}>
-          <Stage environment="city" intensity={0.6}>
-            <Center>
-              <Model 
-                transform={transform} 
-                modelPath={modelPath}
-                modelFormat={modelFormat}
-              />
-            </Center>
-          </Stage>
-        </Suspense>
+        {modelPath ? (
+          <Suspense fallback={
+            <mesh>
+              <boxGeometry args={[2, 2, 2]} />
+              <meshStandardMaterial color="#888888" />
+            </mesh>
+          }>
+            <Stage environment="city" intensity={0.6}>
+              <Center>
+                <Model 
+                  transform={transform} 
+                  modelPath={modelPath}
+                  modelFormat={modelFormat}
+                />
+              </Center>
+            </Stage>
+          </Suspense>
+        ) : (
+          <mesh>
+            <boxGeometry args={[2, 2, 2]} />
+            <meshStandardMaterial color="#888888" />
+          </mesh>
+        )}
 
         {!handTrackingEnabled && <OrbitControls />}
       </Canvas>

@@ -11,9 +11,13 @@ const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(null);
-  const [models, setModels] = useState([]);
+  const [models, setModels] = useState(() => {
+    // Load models from localStorage on mount
+    const saved = localStorage.getItem('localModels');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [selectedModel, setSelectedModel] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [error, setError] = useState(null);
 
@@ -32,12 +36,16 @@ function App() {
   useEffect(() => {
     if (token) {
       fetchUserInfo();
-      fetchModels();
     } else {
       setLoading(false);
       setShowLogin(true);
     }
   }, [token]);
+
+  // Save models to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('localModels', JSON.stringify(models));
+  }, [models]);
 
   const fetchUserInfo = async () => {
     try {
@@ -62,40 +70,14 @@ function App() {
     }
   };
 
-  const fetchModels = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE}/models`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (response.ok) {
-        const modelsData = await response.json();
-        setModels(modelsData);
-        if (modelsData.length > 0 && !selectedModel) {
-          setSelectedModel(modelsData[0]);
-        }
-      } else {
-        setError('Failed to load models');
-      }
-    } catch (error) {
-      console.error('Failed to fetch models:', error);
-      setError('Failed to connect to server');
-      // Fallback to default model
-      setSelectedModel({ id: 'default', name: 'Default Brain', file_format: 'stl' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // No need to fetch models from backend - they're stored locally
 
   const handleLogin = (newToken, userData) => {
     setToken(newToken);
     setUser(userData);
     localStorage.setItem('token', newToken);
     setShowLogin(false);
-    fetchModels();
+    // Models are already loaded from localStorage
   };
 
   const handleLogout = () => {
@@ -107,17 +89,15 @@ function App() {
     setShowLogin(true);
   };
 
-  const handleModelUpload = () => {
-    fetchModels();
+  const handleModelUpload = (newModel) => {
+    // Add new model to local state
+    setModels(prev => [...prev, newModel]);
+    // Automatically select the newly added model
+    setSelectedModel(newModel);
   };
 
-  // Determine model URL
-  const modelUrl = selectedModel?.id === 'default' 
-    ? "/models/brain.stl"
-    : selectedModel 
-    ? `${API_BASE}/models/${selectedModel.id}/file`
-    : "/models/brain.stl";
-
+  // Determine model URL - use blob URL for local models
+  const modelUrl = selectedModel?.blob_url || null;
   const modelFormat = selectedModel?.file_format || "stl";
 
   if (showLogin) {
@@ -138,8 +118,6 @@ function App() {
         user={user} 
         onLogout={handleLogout}
         onModelUpload={handleModelUpload}
-        token={token}
-        API_BASE={API_BASE}
       />
 
       <div className="main-content">
@@ -147,7 +125,6 @@ function App() {
           models={models}
           onSelectModel={setSelectedModel} 
           selectedModel={selectedModel}
-          loading={loading}
         />
 
         <div className="viewer-container">
@@ -166,12 +143,25 @@ function App() {
               {error}
             </div>
           )}
-          <Viewer 
-            transform={data.transform} 
-            modelPath={modelUrl}
-            modelFormat={modelFormat}
-            enableHandTracking={true}
-          />
+          {modelUrl ? (
+            <Viewer 
+              transform={data.transform} 
+              modelPath={modelUrl}
+              modelFormat={modelFormat}
+              enableHandTracking={true}
+            />
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: '#778da9',
+              fontSize: '18px'
+            }}>
+              No model selected. Click "+ Add Model" to load a 3D model from your computer.
+            </div>
+          )}
           <InfoPanel metrics={data.metrics} />
         </div>
       </div>

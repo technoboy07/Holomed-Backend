@@ -3,7 +3,7 @@ HoloMed Backend API
 FastAPI server for managing users, 3D models, and sessions
 """
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -183,9 +183,10 @@ async def get_current_user_info(
 @app.post("/api/models/upload", response_model=ModelResponse, status_code=status.HTTP_201_CREATED)
 async def upload_model(
     file: UploadFile = File(...),
+    name: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user)
 ):
-    """Upload a 3D model file"""
+    """Upload a 3D model file with optional custom name"""
     # Validate filename
     if not file.filename:
         raise HTTPException(
@@ -205,6 +206,12 @@ async def upload_model(
     
     # Sanitize filename to prevent path traversal
     safe_filename = os.path.basename(file.filename)
+    
+    # Use custom name if provided, otherwise use filename (without extension)
+    if name and name.strip():
+        model_name = name.strip()
+    else:
+        model_name = os.path.splitext(safe_filename)[0]
     
     # File size validation (100MB limit)
     MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
@@ -232,7 +239,7 @@ async def upload_model(
     # Create database record
     new_model = Model3D(
         user_id=str(current_user.id),
-        name=file.filename,
+        name=model_name,
         file_path=file_path,
         file_format=file_ext[1:],  # Remove the dot
         file_size=len(content)
