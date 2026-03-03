@@ -1,7 +1,13 @@
 import React, { useState } from "react";
 import UploadModal from "./UploadModal";
 
-export default function Header({ user, onLogout, onModelUpload }) {
+function statusClass(status) {
+  if (status === "up") return "status-up";
+  if (status === "down") return "status-down";
+  return "status-unknown";
+}
+
+export default function Header({ user, onLogout, onModelUpload, API_BASE, token, onToast, healthStatus }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   const handleAddModel = () => {
@@ -17,6 +23,20 @@ export default function Header({ user, onLogout, onModelUpload }) {
       <header className="header">
         <h2>HOLOMED</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="health-strip" title="Service health indicators">
+            <span className="health-item">
+              <span className={`status-dot ${statusClass(healthStatus?.api)}`} />
+              API
+            </span>
+            <span className="health-item">
+              <span className={`status-dot ${statusClass(healthStatus?.auth)}`} />
+              Auth
+            </span>
+            <span className="health-item">
+              <span className={`status-dot ${statusClass(healthStatus?.model)}`} />
+              Model
+            </span>
+          </div>
           {user && (
             <span style={{ fontSize: '14px', color: '#778da9' }}>
               {user.email}
@@ -40,6 +60,9 @@ export default function Header({ user, onLogout, onModelUpload }) {
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadSuccess={handleUploadSuccess}
+        API_BASE={API_BASE}
+        token={token}
+        onToast={onToast}
       />
     </>
   );

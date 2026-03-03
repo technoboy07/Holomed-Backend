@@ -90,3 +90,73 @@
 .add-btn:hover {
   background: #0077b6;
 }
+
+.health-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  padding: 5px 8px;
+  border: 1px solid #415a77;
+  border-radius: 6px;
+  background: rgba(27, 38, 59, 0.5);
+}
+
+.health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #e0e1dd;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-up {
+  background: #2ecc71;
+}
+
+.status-down {
+  background: #ff6b6b;
+}
+
+.status-unknown {
+  background: #778da9;
+}
+
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 12000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 380px;
+}
+
+.toast-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(13, 27, 42, 0.96);
+  color: #e0e1dd;
+  border-radius: 6px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+.toast-close {
+  border: none;
+  background: transparent;
+  color: #778da9;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}

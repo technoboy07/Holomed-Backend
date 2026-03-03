@@ -1,27 +1,35 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import Viewer from "./components/Viewer";
 import InfoPanel from "./components/InfoPanel";
 import LoginModal from "./components/LoginModal";
+import ToastContainer from "./components/ToastContainer";
+import { apiRequest, isUnauthorizedError } from "./utils/api";
 import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
+const API_ROOT = API_BASE.replace(/\/api\/?$/, "");
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(null);
-  const [models, setModels] = useState(() => {
-    // Load models from localStorage on mount
-    const saved = localStorage.getItem('localModels');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [selectedModelUrl, setSelectedModelUrl] = useState(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [loadingModelFile, setLoadingModelFile] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [error, setError] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [modelFileError, setModelFileError] = useState(null);
+  const [healthStatus, setHealthStatus] = useState({
+    api: "unknown",
+    auth: "unknown",
+    model: "unknown",
+  });
 
-  const [data, setData] = useState({
+  const [data] = useState({
     transform: { pitch: 0, yaw: 0, scale: 1.5 },
     metrics: {
       disease: "None",
@@ -32,52 +40,147 @@ function App() {
     }
   });
 
-  // Fetch user info on mount if token exists
+  const clearSelectedModelUrl = useCallback(() => {
+    setSelectedModelUrl((prevUrl) => {
+      if (prevUrl) {
+        URL.revokeObjectURL(prevUrl);
+      }
+      return null;
+    });
+  }, []);
+
+  const setServiceHealth = useCallback((service, status) => {
+    setHealthStatus((prev) => {
+      if (prev[service] === status) return prev;
+      return { ...prev, [service]: status };
+    });
+  }, []);
+
+  const handleAuthFailure = useCallback(() => {
+    localStorage.removeItem('token');
+    setToken(null);
+    setUser(null);
+    setModels([]);
+    setSelectedModel(null);
+    clearSelectedModelUrl();
+    setModelFileError(null);
+    setServiceHealth("auth", "down");
+    setShowLogin(true);
+  }, [clearSelectedModelUrl, setServiceHealth]);
+
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
+  const addToast = useCallback(({ type = "info", message }) => {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      dismissToast(id);
+    }, 5000);
+  }, [dismissToast]);
+
+  const fetchModels = useCallback(async () => {
+    if (!token) return;
+
+    setLoadingModels(true);
+    try {
+      const modelData = await apiRequest(API_BASE, "/models", {
+        token,
+      });
+      setServiceHealth("api", "up");
+      setModels(modelData);
+
+      if (selectedModel) {
+        const exists = modelData.some((m) => m.id === selectedModel.id);
+        if (!exists) {
+          setSelectedModel(null);
+          clearSelectedModelUrl();
+        }
+      }
+    } catch (fetchError) {
+      if (isUnauthorizedError(fetchError)) {
+        setServiceHealth("api", "up");
+        handleAuthFailure();
+        return;
+      }
+      setServiceHealth("api", "down");
+      console.error('Failed to fetch models:', fetchError);
+      const message = fetchError.message || 'Failed to fetch models';
+      setError(message);
+      addToast({ type: "error", message });
+    } finally {
+      setLoadingModels(false);
+    }
+  }, [token, handleAuthFailure, selectedModel, clearSelectedModelUrl, addToast, setServiceHealth]);
+
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const userData = await apiRequest(API_BASE, "/auth/me", {
+        token,
+      });
+      setServiceHealth("api", "up");
+      setServiceHealth("auth", "up");
+      setUser(userData);
+    } catch (fetchError) {
+      if (isUnauthorizedError(fetchError)) {
+        setServiceHealth("api", "up");
+        handleAuthFailure();
+        return;
+      }
+      setServiceHealth("api", "down");
+      console.error('Failed to fetch user info:', fetchError);
+      const message = fetchError.message || 'Failed to connect to server';
+      setError(message);
+      addToast({ type: "error", message });
+    }
+  }, [token, handleAuthFailure, addToast, setServiceHealth]);
+
+  const checkApiHealth = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_ROOT}/health`);
+      setServiceHealth("api", response.ok ? "up" : "down");
+    } catch {
+      setServiceHealth("api", "down");
+    }
+  }, [setServiceHealth]);
+
   useEffect(() => {
     if (token) {
       fetchUserInfo();
+      fetchModels();
     } else {
-      setLoading(false);
       setShowLogin(true);
+      setModels([]);
     }
-  }, [token]);
+  }, [token, fetchUserInfo, fetchModels]);
 
-  // Save models to localStorage whenever they change
   useEffect(() => {
-    localStorage.setItem('localModels', JSON.stringify(models));
-  }, [models]);
+    checkApiHealth();
+    const interval = setInterval(checkApiHealth, 30000);
+    return () => clearInterval(interval);
+  }, [checkApiHealth]);
 
-  const fetchUserInfo = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-      } else {
-        // Token invalid, clear it
-        localStorage.removeItem('token');
-        setToken(null);
-        setShowLogin(true);
-      }
-    } catch (error) {
-      console.error('Failed to fetch user info:', error);
-      setError('Failed to connect to server');
-    }
-  };
+  useEffect(() => {
+    if (!error) return undefined;
+    const timeout = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [error]);
 
-  // No need to fetch models from backend - they're stored locally
+  useEffect(() => {
+    return () => {
+      clearSelectedModelUrl();
+    };
+  }, [clearSelectedModelUrl]);
 
   const handleLogin = (newToken, userData) => {
     setToken(newToken);
     setUser(userData);
     localStorage.setItem('token', newToken);
     setShowLogin(false);
-    // Models are already loaded from localStorage
+    setError(null);
+    setServiceHealth("auth", "up");
+    addToast({ type: "success", message: `Welcome ${userData.email}` });
   };
 
   const handleLogout = () => {
@@ -86,18 +189,96 @@ function App() {
     setUser(null);
     setModels([]);
     setSelectedModel(null);
+    clearSelectedModelUrl();
+    setModelFileError(null);
     setShowLogin(true);
+    setServiceHealth("auth", "down");
+    addToast({ type: "info", message: "Logged out successfully" });
   };
 
   const handleModelUpload = (newModel) => {
-    // Add new model to local state
-    setModels(prev => [...prev, newModel]);
-    // Automatically select the newly added model
+    setModels((prev) => [newModel, ...prev]);
     setSelectedModel(newModel);
+    setModelFileError(null);
+    loadModelFile(newModel);
+    setError(null);
   };
 
-  // Determine model URL - use blob URL for local models
-  const modelUrl = selectedModel?.blob_url || null;
+  const loadModelFile = async (model) => {
+    if (!model?.id || !token) return;
+
+    setLoadingModelFile(true);
+    clearSelectedModelUrl();
+    setModelFileError(null);
+
+    try {
+      const blob = await apiRequest(API_BASE, `/models/${model.id}/file`, {
+        token,
+        responseType: "blob",
+      });
+      setServiceHealth("api", "up");
+      setServiceHealth("model", "up");
+      const blobUrl = URL.createObjectURL(blob);
+      setSelectedModelUrl(blobUrl);
+      setError(null);
+    } catch (fileError) {
+      if (isUnauthorizedError(fileError)) {
+        setServiceHealth("api", "up");
+        handleAuthFailure();
+        return;
+      }
+      setServiceHealth("api", "down");
+      setServiceHealth("model", "down");
+      console.error('Failed to load model file:', fileError);
+      const message = fileError.message || 'Failed to load model file';
+      setError(message);
+      setModelFileError(message);
+      addToast({ type: "error", message });
+    } finally {
+      setLoadingModelFile(false);
+    }
+  };
+
+  const handleSelectModel = async (model) => {
+    setSelectedModel(model);
+    setServiceHealth("model", "unknown");
+    await loadModelFile(model);
+  };
+
+  const handleDeleteModel = async (model) => {
+    if (!model?.id || !token) return;
+
+    const shouldDelete = window.confirm(`Delete model "${model.name}"?`);
+    if (!shouldDelete) return;
+
+    try {
+      await apiRequest(API_BASE, `/models/${model.id}`, {
+        method: "DELETE",
+        token,
+        responseType: "none",
+      });
+
+      setModels((prev) => prev.filter((m) => m.id !== model.id));
+      if (selectedModel?.id === model.id) {
+        setSelectedModel(null);
+        clearSelectedModelUrl();
+        setModelFileError(null);
+        setServiceHealth("model", "unknown");
+      }
+      addToast({ type: "success", message: `Deleted "${model.name}"` });
+    } catch (deleteError) {
+      if (isUnauthorizedError(deleteError)) {
+        handleAuthFailure();
+        return;
+      }
+      console.error('Failed to delete model:', deleteError);
+      const message = deleteError.message || 'Failed to delete model';
+      setError(message);
+      addToast({ type: "error", message });
+    }
+  };
+
+  const modelUrl = selectedModelUrl || null;
   const modelFormat = selectedModel?.file_format || "stl";
 
   if (showLogin) {
@@ -107,6 +288,7 @@ function App() {
           onLogin={handleLogin} 
           onClose={() => {}} 
           API_BASE={API_BASE}
+          onToast={addToast}
         />
       </div>
     );
@@ -118,29 +300,34 @@ function App() {
         user={user} 
         onLogout={handleLogout}
         onModelUpload={handleModelUpload}
+        API_BASE={API_BASE}
+        token={token}
+        onToast={addToast}
+        healthStatus={healthStatus}
       />
 
       <div className="main-content">
         <Sidebar 
           models={models}
-          onSelectModel={setSelectedModel} 
+          onSelectModel={handleSelectModel}
           selectedModel={selectedModel}
+          onDeleteModel={handleDeleteModel}
+          loading={loadingModels}
         />
 
         <div className="viewer-container">
-          {error && (
+          {loadingModelFile && (
             <div style={{
               position: 'absolute',
               top: 10,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: 'rgba(255, 0, 0, 0.8)',
-              color: 'white',
-              padding: '10px 20px',
+              right: 10,
+              background: 'rgba(0, 0, 0, 0.6)',
+              color: '#e0e1dd',
+              padding: '8px 12px',
               borderRadius: '4px',
               zIndex: 1000
             }}>
-              {error}
+              Loading model...
             </div>
           )}
           {modelUrl ? (
@@ -150,6 +337,28 @@ function App() {
               modelFormat={modelFormat}
               enableHandTracking={true}
             />
+          ) : selectedModel && modelFileError ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              color: '#e0e1dd',
+              textAlign: 'center',
+              gap: '12px',
+              padding: '20px'
+            }}>
+              <h3 style={{ margin: 0, color: '#ff6b6b' }}>Failed to load selected model</h3>
+              <p style={{ margin: 0, color: '#778da9' }}>{modelFileError}</p>
+              <button
+                className="add-btn"
+                onClick={() => loadModelFile(selectedModel)}
+                disabled={loadingModelFile}
+              >
+                Retry Loading
+              </button>
+            </div>
           ) : (
             <div style={{
               display: 'flex',
@@ -165,6 +374,7 @@ function App() {
           <InfoPanel metrics={data.metrics} />
         </div>
       </div>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

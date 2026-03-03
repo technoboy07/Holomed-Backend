@@ -3,7 +3,7 @@ HoloMed Backend API
 FastAPI server for managing users, 3D models, and sessions
 """
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from bson import ObjectId
 import json
+import time
 
 from database import init_db, close_db
 from models import User, Model3D, Session as SessionModel
@@ -36,6 +37,19 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log basic request diagnostics for API troubleshooting."""
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    print(
+        f"{request.method} {request.url.path} "
+        f"status={response.status_code} duration_ms={duration_ms:.2f}"
+    )
+    return response
 
 # CORS configuration for web/mobile apps
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8081")

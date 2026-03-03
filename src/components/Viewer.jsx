@@ -3,6 +3,8 @@ import { Canvas, useLoader } from "@react-three/fiber";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader";
+import { VTKLoader } from "three/examples/jsm/loaders/VTKLoader";
 import { Stage, Center, OrbitControls } from "@react-three/drei";
 import { useHandTracking } from "../hooks/useHandTracking";
 
@@ -11,10 +13,31 @@ function getLoader(format) {
   switch(ext) {
     case 'stl': return STLLoader;
     case 'obj': return OBJLoader;
+    case 'ply': return PLYLoader;
+    case 'vtk': return VTKLoader;
     case 'gltf':
     case 'glb': return GLTFLoader;
     default: return STLLoader;
   }
+}
+
+function findFirstMesh(node) {
+  if (!node) return null;
+
+  if (node.isMesh && node.geometry) {
+    return node;
+  }
+
+  if (!node.children || node.children.length === 0) {
+    return null;
+  }
+
+  for (const child of node.children) {
+    const mesh = findFirstMesh(child);
+    if (mesh) return mesh;
+  }
+
+  return null;
 }
 
 function Model({ transform, modelPath, modelFormat }) {
@@ -45,34 +68,38 @@ function Model({ transform, modelPath, modelFormat }) {
   );
 
   // Handle different loader return types
-  const geometry = useMemo(() => {
-    
+  const renderData = useMemo(() => {
+    const format = modelFormat?.toLowerCase();
+
     try {
-      if (modelFormat === 'gltf' || modelFormat === 'glb') {
+      if (format === 'gltf' || format === 'glb') {
         // GLTFLoader returns a scene, extract the first mesh
         if (modelData?.scene) {
-          const mesh = modelData.scene.children.find(child => child.isMesh);
-          return mesh ? mesh.geometry : null;
+          const mesh = findFirstMesh(modelData.scene);
+          if (mesh?.geometry) {
+            return { geometry: mesh.geometry, object: null };
+          }
         }
-        return null;
-      } else if (modelFormat === 'obj') {
+        return { geometry: null, object: null };
+      } else if (format === 'obj') {
         // OBJLoader returns an object with children
-        if (modelData?.children && modelData.children[0]) {
-          return modelData.children[0].geometry;
+        const mesh = findFirstMesh(modelData);
+        if (mesh?.geometry) {
+          return { geometry: mesh.geometry, object: null };
         }
-        return modelData;
+        return { geometry: null, object: null };
       } else {
-        // STLLoader returns geometry directly
-        return modelData;
+        // STL/PLY/VTK loaders return geometry directly
+        return { geometry: modelData, object: null };
       }
     } catch (error) {
       console.error("Error extracting geometry:", error);
-      return null;
+      return { geometry: null, object: null };
     }
   }, [modelData, modelFormat]);
 
-  // Fallback to placeholder if geometry extraction fails
-  if (!geometry) {
+  // Fallback to placeholder if extraction fails
+  if (!renderData.geometry && !renderData.object) {
     return (
       <mesh
         rotation={[transform.pitch * Math.PI / 180, transform.yaw * Math.PI / 180, 0]}
@@ -86,7 +113,7 @@ function Model({ transform, modelPath, modelFormat }) {
 
   return (
     <mesh
-      geometry={geometry}
+      geometry={renderData.geometry}
       rotation={[transform.pitch * Math.PI / 180, transform.yaw * Math.PI / 180, 0]}
       scale={[transform.scale, transform.scale, transform.scale]}
     >

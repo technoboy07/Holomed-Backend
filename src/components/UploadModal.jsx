@@ -1,16 +1,17 @@
 import React, { useState, useRef, useCallback } from "react";
+import { apiRequest } from "../utils/api";
 
-export default function UploadModal({ isOpen, onClose, onUploadSuccess }) {
+export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE, token, onToast }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
-  const xhrRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileSize, setFileSize] = useState(null);
   const [modelName, setModelName] = useState('');
   const [showNameInput, setShowNameInput] = useState(false);
+  const abortControllerRef = useRef(null);
 
   const allowedFormats = ['.stl', '.obj', '.ply', '.vtk', '.gltf', '.glb'];
   const MAX_SIZE = 100 * 1024 * 1024; // 100MB
@@ -52,6 +53,10 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }) {
 
   const handleFileUpload = async () => {
     if (!selectedFile) return;
+    if (!token) {
+      setError('You must be logged in to upload models');
+      return;
+    }
 
     if (!modelName.trim()) {
       setError('Please enter a name for your model');
@@ -63,47 +68,38 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }) {
     setProgress(0);
 
     try {
-      // Simulate progress for better UX
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 50);
+      setProgress(20);
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('name', modelName.trim());
 
-      // Create blob URL from file
-      const blobUrl = URL.createObjectURL(selectedFile);
-      
-      // Get file extension
-      const fileExt = selectedFile.name.split('.').pop().toLowerCase();
-      
-      // Create model object
-      const model = {
-        id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: modelName.trim(),
-        file_format: fileExt,
-        file_size: selectedFile.size,
-        blob_url: blobUrl,
-        created_at: new Date().toISOString()
-      };
+      abortControllerRef.current = new AbortController();
+      const responseData = await apiRequest(API_BASE, "/models/upload", {
+        method: "POST",
+        token,
+        body: formData,
+        signal: abortControllerRef.current.signal,
+      });
 
-      // Complete progress
-      clearInterval(progressInterval);
+      setProgress(90);
       setProgress(100);
 
-      // Show success briefly before closing
       setTimeout(() => {
-        onUploadSuccess(model);
+        onUploadSuccess(responseData);
+        onToast?.({ type: "success", message: "Model uploaded successfully" });
         handleClose();
       }, 500);
-    } catch (error) {
-      console.error('Error processing file:', error);
-      setError('Failed to process file. Please try again.');
+    } catch (uploadError) {
+      if (uploadError.name === 'AbortError') {
+        setError('Upload cancelled');
+      } else {
+        console.error('Error uploading file:', uploadError);
+        setError(uploadError.message || 'Failed to upload file. Please try again.');
+      }
       setUploading(false);
       setProgress(0);
+    } finally {
+      abortControllerRef.current = null;
     }
   };
 
@@ -134,26 +130,34 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }) {
     }
   }, []);
 
+  const resetState = () => {
+    setError(null);
+    setProgress(0);
+    setSelectedFile(null);
+    setFileSize(null);
+    setModelName('');
+    setShowNameInput(false);
+    setDragActive(false);
+    setUploading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleClose = () => {
     if (!uploading || progress === 100) {
-      // Clean up XHR if still active
-      if (xhrRef.current && uploading && progress < 100) {
-        xhrRef.current.abort();
-        xhrRef.current = null;
-      }
-      setError(null);
-      setProgress(0);
-      setSelectedFile(null);
-      setFileSize(null);
-      setModelName('');
-      setShowNameInput(false);
-      setDragActive(false);
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      resetState();
       onClose();
     }
+  };
+
+  const handleCancelUpload = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setError('Upload cancelled');
+    setUploading(false);
+    setProgress(0);
   };
 
   if (!isOpen) return null;
@@ -402,20 +406,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess }) {
             marginTop: '20px'
           }}>
             <button
-              onClick={() => {
-                // Properly abort the XHR request
-                if (xhrRef.current) {
-                  xhrRef.current.abort();
-                  xhrRef.current = null;
-                }
-                setUploading(false);
-                setProgress(0);
-                setError('Upload cancelled');
-                setSelectedFile(null);
-                setFileSize(null);
-                setModelName('');
-                setShowNameInput(false);
-              }}
+              onClick={handleCancelUpload}
               style={{
                 background: '#6c757d',
                 border: 'none',

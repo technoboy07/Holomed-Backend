@@ -1,6 +1,7 @@
 import React, { useState } from "react";
+import { apiRequest } from "../utils/api";
 
-export default function LoginModal({ onLogin, onClose, API_BASE }) {
+export default function LoginModal({ onLogin, onClose, API_BASE, onToast }) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -19,60 +20,39 @@ export default function LoginModal({ onLogin, onClose, API_BASE }) {
         const formData = new FormData();
         formData.append('username', email); // FastAPI OAuth2 uses 'username' field
         formData.append('password', password);
-
-        const response = await fetch(`${API_BASE}/auth/login`, {
-          method: 'POST',
-          body: formData
+        const data = await apiRequest(API_BASE, "/auth/login", {
+          method: "POST",
+          body: formData,
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          onLogin(data.access_token, data.user);
-        } else {
-          const errorData = await response.json();
-          setError(errorData.detail || "Login failed");
-        }
+        onLogin(data.access_token, data.user);
       } else {
         // Register
-        const response = await fetch(`${API_BASE}/auth/register`, {
-          method: 'POST',
+        await apiRequest(API_BASE, "/auth/register", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json'
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             email,
             username: username || email.split('@')[0],
-            password
-          })
+            password,
+          }),
         });
-
-        if (response.ok) {
-          const userData = await response.json();
-          // After registration, automatically log in
-          const loginFormData = new FormData();
-          loginFormData.append('username', email);
-          loginFormData.append('password', password);
-
-          const loginResponse = await fetch(`${API_BASE}/auth/login`, {
-            method: 'POST',
-            body: loginFormData
-          });
-
-          if (loginResponse.ok) {
-            const loginData = await loginResponse.json();
-            onLogin(loginData.access_token, loginData.user);
-          } else {
-            setError("Registration successful. Please log in.");
-            setIsLogin(true);
-          }
-        } else {
-          const errorData = await response.json();
-          setError(errorData.detail || "Registration failed");
-        }
+        
+        // After registration, automatically log in
+        const loginFormData = new FormData();
+        loginFormData.append('username', email);
+        loginFormData.append('password', password);
+        const loginData = await apiRequest(API_BASE, "/auth/login", {
+          method: "POST",
+          body: loginFormData,
+        });
+        onLogin(loginData.access_token, loginData.user);
+        onToast?.({ type: "success", message: "Registration successful" });
       }
-    } catch (error) {
-      console.error('Auth error:', error);
-      setError("Failed to connect to server. Please check if the backend is running.");
+    } catch (authError) {
+      console.error('Auth error:', authError);
+      setError(authError.message || "Failed to connect to server. Please check if the backend is running.");
     } finally {
       setLoading(false);
     }
