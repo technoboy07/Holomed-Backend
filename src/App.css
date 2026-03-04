@@ -1,32 +1,196 @@
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background: #0b0e14;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #0a101a 0%, #070b12 100%);
   color: white;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .header {
-  height: 60px;
-  background: #0d1b2a;
+  min-height: 78px;
+  background: rgba(9, 18, 31, 0.92);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  border-bottom: 1px solid #1b263b;
+  padding: 10px 20px;
+  border-bottom: 1px solid #24384d;
+  backdrop-filter: blur(8px);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.header-left h2 {
+  margin: 0;
+  letter-spacing: 1px;
+}
+
+.case-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.case-badge {
+  background: rgba(0, 180, 216, 0.16);
+  border: 1px solid rgba(0, 180, 216, 0.45);
+  color: #8be9ff;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.case-value {
+  font-size: 13px;
+  color: #e0e1dd;
+  font-weight: 600;
+}
+
+.case-meta {
+  font-size: 11px;
+  color: #8da4bb;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .main-content {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
+  gap: 10px;
+  padding: 10px;
+  min-height: calc(100vh - 98px);
+  align-items: stretch;
 }
 
 .sidebar {
-  width: 220px;
-  background: #1b263b;
-  padding: 20px;
-  border-right: 1px solid #415a77;
+  width: 280px;
+  background: rgba(13, 24, 40, 0.9);
+  padding: 14px;
+  border: 1px solid #2a4158;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.sidebar h4 {
+  margin: 0;
+  color: #d5e5f1;
+}
+
+.sidebar-count {
+  font-size: 12px;
+  color: #8da4bb;
+}
+
+.sidebar-search {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #3b536a;
+  border-radius: 8px;
+  background: #0d1b2a;
+  color: #e0e1dd;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.sidebar-search:focus {
+  outline: none;
+  border-color: #00b4d8;
+}
+
+.sidebar-loading,
+.sidebar-empty {
+  color: #8da4bb;
+  padding: 10px;
+  font-size: 12px;
+}
+
+.model-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.model-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(20, 34, 53, 0.6);
+  transition: all 0.2s ease;
+}
+
+.model-item:hover {
+  border-color: #37546f;
+  background: rgba(24, 42, 66, 0.75);
+}
+
+.model-item.active {
+  border-color: #00b4d8;
+  background: rgba(0, 180, 216, 0.12);
+}
+
+.model-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-name {
+  color: #e0e1dd;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #8da4bb;
+}
+
+.model-date {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #6f8ba3;
+}
+
+.delete-model-btn {
+  background: transparent;
+  border: none;
+  color: #ff6b6b;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
 }
 
 .viewer-container {
@@ -34,57 +198,110 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  height: 100%; /* Ensure it doesn't collapse */
+  min-height: calc(100vh - 130px);
+  border: 1px solid #2a4158;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(11, 18, 29, 0.85);
 }
 
 .viewer-area {
   flex: 1;
+  min-height: 560px;
   width: 100%;
-  background: radial-gradient(circle, #1b263b 0%, #0b0e14 100%);
+  background: radial-gradient(circle, #18283d 0%, #0b0e14 100%);
 }
-.diagnosis-panel {
-  height: 100px;
-  background: rgba(13, 27, 42, 0.85);
-  backdrop-filter: blur(10px);
+
+.viewer-empty {
   display: flex;
-  justify-content: space-around;
   align-items: center;
-  border-top: 1px solid #00b4d8;
+  justify-content: center;
+  height: 100%;
+  color: #8da4bb;
+  font-size: 17px;
+  text-align: center;
+  padding: 20px;
 }
 
-.metric-item span {
-  display: block;
-  font-size: 10px;
-  color: #778da9;
+.insights-panel {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.sidebar ul {
-  list-style: none;
-  padding: 0;
+.insights-card {
+  background: rgba(13, 24, 40, 0.9);
+  border: 1px solid #2a4158;
+  border-radius: 10px;
+  padding: 12px;
 }
 
-.sidebar li {
-  padding: 8px 0;
+.insights-card h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #d5e5f1;
+}
+
+#clinical-tools-host {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.insight-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.insight-row span {
+  color: #8da4bb;
+}
+
+.insight-row strong {
+  color: #e0e1dd;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.insight-btn {
+  width: 100%;
+  margin-bottom: 8px;
+  background: #00b4d8;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  padding: 8px;
   cursor: pointer;
-  transition: 0.3s;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.sidebar li:hover {
-  color: #00b4d8;
+.insight-btn:last-child {
+  margin-bottom: 0;
 }
 
-.sidebar li.active {
-  color: #00b4d8;
-  font-weight: bold;
+.insight-btn.secondary {
+  background: #415a77;
 }
 
 .add-btn {
   background: #00b4d8;
   border: none;
-  padding: 6px 12px;
+  padding: 7px 12px;
   color: white;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.add-btn.secondary {
+  background: #415a77;
 }
 
 .add-btn:hover {
@@ -159,4 +376,14 @@
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+}
+
+@media (max-width: 1200px) {
+  .insights-panel {
+    display: none;
+  }
+
+  .sidebar {
+    width: 250px;
+  }
 }

@@ -23,6 +23,7 @@ function App() {
   const [error, setError] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [modelFileError, setModelFileError] = useState(null);
+  const [presentationMode, setPresentationMode] = useState(false);
   const [healthStatus, setHealthStatus] = useState({
     api: "unknown",
     auth: "unknown",
@@ -304,16 +305,21 @@ function App() {
         token={token}
         onToast={addToast}
         healthStatus={healthStatus}
+        selectedModel={selectedModel}
+        presentationMode={presentationMode}
+        onTogglePresentationMode={() => setPresentationMode((prev) => !prev)}
       />
 
       <div className="main-content">
-        <Sidebar 
-          models={models}
-          onSelectModel={handleSelectModel}
-          selectedModel={selectedModel}
-          onDeleteModel={handleDeleteModel}
-          loading={loadingModels}
-        />
+        {!presentationMode && (
+          <Sidebar 
+            models={models}
+            onSelectModel={handleSelectModel}
+            selectedModel={selectedModel}
+            onDeleteModel={handleDeleteModel}
+            loading={loadingModels}
+          />
+        )}
 
         <div className="viewer-container">
           {loadingModelFile && (
@@ -360,19 +366,12 @@ function App() {
               </button>
             </div>
           ) : (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              color: '#778da9',
-              fontSize: '18px'
-            }}>
+            <div className="viewer-empty">
               No model selected. Click "+ Add Model" to load a 3D model from your computer.
             </div>
           )}
-          <InfoPanel metrics={data.metrics} />
         </div>
+        {!presentationMode && <InfoPanel metrics={data.metrics} selectedModel={selectedModel} />}
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

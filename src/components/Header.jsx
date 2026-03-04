@@ -7,7 +7,18 @@ function statusClass(status) {
   return "status-unknown";
 }
 
-export default function Header({ user, onLogout, onModelUpload, API_BASE, token, onToast, healthStatus }) {
+export default function Header({
+  user,
+  onLogout,
+  onModelUpload,
+  API_BASE,
+  token,
+  onToast,
+  healthStatus,
+  selectedModel,
+  presentationMode,
+  onTogglePresentationMode,
+}) {
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   const handleAddModel = () => {
@@ -21,8 +32,20 @@ export default function Header({ user, onLogout, onModelUpload, API_BASE, token,
   return (
     <>
       <header className="header">
-        <h2>HOLOMED</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="header-left">
+          <h2>HOLOMED</h2>
+          <div className="case-context">
+            <span className="case-badge">Demo Case</span>
+            <span className="case-value">
+              {selectedModel?.name || "No model selected"}
+            </span>
+            <span className="case-meta">
+              {selectedModel?.file_format?.toUpperCase() || "--"} / {selectedModel?.file_size ? `${(selectedModel.file_size / 1024 / 1024).toFixed(1)} MB` : "--"}
+            </span>
+          </div>
+        </div>
+
+        <div className="header-actions">
           <div className="health-strip" title="Service health indicators">
             <span className="health-item">
               <span className={`status-dot ${statusClass(healthStatus?.api)}`} />
@@ -37,6 +60,9 @@ export default function Header({ user, onLogout, onModelUpload, API_BASE, token,
               Model
             </span>
           </div>
+          <button className="add-btn secondary" onClick={onTogglePresentationMode}>
+            {presentationMode ? "Exit Presentation" : "Presentation Mode"}
+          </button>
           {user && (
             <span style={{ fontSize: '14px', color: '#778da9' }}>
               {user.email}
