@@ -3,7 +3,18 @@ HoloMed Backend API
 FastAPI server for managing users, 3D models, and sessions
 """
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, WebSocket, WebSocketDisconnect, Request
+from fastapi import (
+    FastAPI,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Form,
+    status,
+    WebSocket,
+    WebSocketDisconnect,
+    Request,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -16,11 +27,27 @@ from contextlib import asynccontextmanager
 from bson import ObjectId
 import json
 import time
+import asyncio
+import subprocess
+import sys
 
 from database import init_db, close_db
-from models import User, Model3D, Session as SessionModel
+from models import User, Model3D, Session as SessionModel, Case, Artifact, AnalysisRun, Finding
 from auth import verify_token, get_current_user, create_access_token, hash_password, verify_password
-from schemas import UserCreate, UserResponse, ModelCreate, ModelResponse, SessionCreate, SessionResponse
+from schemas import (
+    UserCreate,
+    UserResponse,
+    ModelCreate,
+    ModelResponse,
+    SessionCreate,
+    SessionResponse,
+    CaseCreate,
+    CaseResponse,
+    ArtifactResponse,
+    AnalyzeRequest,
+    AnalysisRunResponse,
+    FindingResponse,
+)
 
 # Lifespan events for database connection
 @asynccontextmanager
@@ -101,6 +128,119 @@ manager = ConnectionManager()
 upload_dir = "uploads"
 os.makedirs(upload_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
+
+# CT workflow storage (Phase 1)
+ct_upload_dir = os.path.join(upload_dir, "ct")
+os.makedirs(ct_upload_dir, exist_ok=True)
+
+derived_upload_dir = os.path.join(upload_dir, "derived")
+os.makedirs(derived_upload_dir, exist_ok=True)
+
+
+async def _process_analysis_run(run_id: str):
+    """Best-effort async background processing for a single analysis run.
+
+    Phase 2: persists a Findings JSON artifact and Finding records.
+    The actual ML inference hooks are added incrementally.
+    """
+    run = await AnalysisRun.get(ObjectId(run_id))
+    if not run:
+        return
+
+    run.status = "running"
+    run.started_at = datetime.now(timezone.utc)
+    run.progress = 0.01
+    run.error = None
+    await run.save()
+
+    try:
+        # Load CT artifact
+        ct_artifact = await Artifact.get(ObjectId(run.ct_artifact_id))
+        if not ct_artifact or ct_artifact.user_id != run.user_id:
+            raise RuntimeError("CT artifact not found for this run")
+
+        from holomed_ct.pipeline import CtFinding, persist_findings_as_artifacts
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        bundle_root = os.path.join(repo_root, "lung_nodule_ct_detection")
+
+        run.progress = 0.1
+        await run.save()
+
+        # Run the CT pipeline in a separate Python env (more robust than importing MONAI inside the API process).
+        backend_dir = os.path.abspath(os.path.dirname(__file__))
+        default_runner_py = os.path.join(backend_dir, "venv", "Scripts", "python.exe")
+        runner_py = os.getenv("HOLOMED_CT_PYTHON") or (default_runner_py if os.path.exists(default_runner_py) else sys.executable)
+
+        run_dir = os.path.join(derived_upload_dir, f"case_{run.case_id}_run_{run_id}")
+        os.makedirs(run_dir, exist_ok=True)
+        runner_out_json = os.path.join(run_dir, "runner_findings.json")
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = backend_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+        cmd = [
+            runner_py,
+            "-m",
+            "holomed_ct.ct_runner",
+            "--ct",
+            ct_artifact.file_path,
+            "--bundle-root",
+            bundle_root,
+            "--vista3d-root",
+            os.path.join(os.path.abspath(os.path.dirname(__file__)), "ml_bundles", "vista3d"),
+            "--out-dir",
+            run_dir,
+            "--out-json",
+            runner_out_json,
+        ]
+
+        completed = subprocess.run(cmd, cwd=backend_dir, env=env, capture_output=True, text=True)
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "CT runner failed. Ensure the runner Python has MONAI+torch installed. "
+                f"stderr: {completed.stderr[-2000:]}"
+            )
+
+        with open(runner_out_json, "r", encoding="utf-8") as f:
+            runner_payload = json.load(f)
+
+        findings: List[CtFinding] = []
+        for f in runner_payload.get("findings", []):
+            findings.append(
+                CtFinding(
+                    label=f.get("label", "unknown"),
+                    score=f.get("score"),
+                    centroid_world=f.get("centroid_world"),
+                    bbox_world=f.get("bbox_world"),
+                    volume_mm3=f.get("volume_mm3"),
+                    diameter_mm=f.get("diameter_mm"),
+                    mask_path=f.get("mask_path"),
+                    mesh_path=f.get("mesh_path"),
+                )
+            )
+
+        run.progress = 0.8
+        await run.save()
+
+        outputs = await persist_findings_as_artifacts(
+            run=run,
+            derived_upload_dir=derived_upload_dir,
+            findings=findings,
+            extra={"segmentation_method": "ellipsoid_from_detection_box_v0", "runner_python": runner_py},
+        )
+
+        run.status = "succeeded"
+        run.progress = 1.0
+        run.finished_at = datetime.now(timezone.utc)
+        run.outputs = outputs
+        await run.save()
+    except Exception as e:
+        run.status = "failed"
+        run.progress = None
+        run.finished_at = datetime.now(timezone.utc)
+        run.error = str(e)
+        await run.save()
 
 # Health check endpoint
 @app.get("/health")
@@ -393,6 +533,295 @@ async def delete_model(
     
     await model.delete()
     return None
+
+
+# Case + CT artifact endpoints (Phase 1)
+@app.post("/api/cases", response_model=CaseResponse, status_code=status.HTTP_201_CREATED)
+async def create_case(
+    case: CaseCreate,
+    current_user: User = Depends(get_current_user),
+):
+    new_case = Case(user_id=str(current_user.id), name=case.name.strip() if case.name else None)
+    await new_case.insert()
+    return CaseResponse(id=str(new_case.id), name=new_case.name, created_at=new_case.created_at)
+
+
+@app.get("/api/cases", response_model=List[CaseResponse])
+async def list_cases(current_user: User = Depends(get_current_user)):
+    cases = await Case.find(Case.user_id == str(current_user.id)).sort(-Case.created_at).to_list()
+    return [CaseResponse(id=str(c.id), name=c.name, created_at=c.created_at) for c in cases]
+
+
+@app.get("/api/cases/{case_id}", response_model=CaseResponse)
+async def get_case(case_id: str, current_user: User = Depends(get_current_user)):
+    try:
+        case_obj_id = ObjectId(case_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid case ID format")
+
+    case = await Case.find_one(Case.id == case_obj_id, Case.user_id == str(current_user.id))
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    return CaseResponse(id=str(case.id), name=case.name, created_at=case.created_at)
+
+
+@app.post(
+    "/api/cases/{case_id}/ct/upload",
+    response_model=ArtifactResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_ct_to_case(
+    case_id: str,
+    file: UploadFile = File(...),
+    name: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+):
+    # Validate case
+    try:
+        case_obj_id = ObjectId(case_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid case ID format")
+
+    case = await Case.find_one(Case.id == case_obj_id, Case.user_id == str(current_user.id))
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required")
+
+    allowed_formats = [".nii", ".nii.gz"]
+    lower_name = file.filename.lower()
+    file_ext = ".nii.gz" if lower_name.endswith(".nii.gz") else os.path.splitext(lower_name)[1]
+    if file_ext not in allowed_formats:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format. Allowed: {', '.join(allowed_formats)}",
+        )
+
+    safe_filename = os.path.basename(file.filename)
+    artifact_name = name.strip() if name and name.strip() else safe_filename
+
+    # Size limit: start conservative (512MB) for CT volumes
+    MAX_FILE_SIZE = 512 * 1024 * 1024
+
+    try:
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size exceeds maximum of {MAX_FILE_SIZE / 1024 / 1024}MB",
+            )
+
+        file_path = os.path.join(
+            ct_upload_dir,
+            f"{current_user.id}_{case_id}_{datetime.now().timestamp()}_{safe_filename}",
+        )
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+    except IOError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save file: {str(e)}",
+        )
+
+    artifact = Artifact(
+        user_id=str(current_user.id),
+        case_id=str(case_obj_id),
+        type="ct_volume",
+        name=artifact_name,
+        file_path=file_path,
+        file_format=file_ext.lstrip("."),
+        file_size=len(content),
+    )
+    await artifact.insert()
+
+    return ArtifactResponse(
+        id=str(artifact.id),
+        case_id=artifact.case_id,
+        type=artifact.type,
+        name=artifact.name,
+        file_path=artifact.file_path,
+        file_format=artifact.file_format,
+        file_size=artifact.file_size,
+        created_at=artifact.created_at,
+    )
+
+
+@app.get("/api/artifacts/{artifact_id}/file")
+async def get_artifact_file(
+    artifact_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        artifact_obj_id = ObjectId(artifact_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid artifact ID format")
+
+    artifact = await Artifact.find_one(Artifact.id == artifact_obj_id, Artifact.user_id == str(current_user.id))
+    if not artifact:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+
+    if not os.path.exists(artifact.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found on server")
+
+    return FileResponse(
+        artifact.file_path,
+        media_type="application/octet-stream",
+        filename=artifact.name,
+    )
+
+
+@app.post("/api/cases/{case_id}/analyze", response_model=AnalysisRunResponse, status_code=status.HTTP_201_CREATED)
+async def start_case_analysis(
+    case_id: str,
+    request: AnalyzeRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        case_obj_id = ObjectId(case_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid case ID format")
+
+    case = await Case.find_one(Case.id == case_obj_id, Case.user_id == str(current_user.id))
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    ct_artifact_id = request.ct_artifact_id
+    if ct_artifact_id:
+        # Validate provided artifact id
+        try:
+            ct_obj_id = ObjectId(ct_artifact_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ct_artifact_id format")
+
+        ct_artifact = await Artifact.find_one(
+            Artifact.id == ct_obj_id,
+            Artifact.user_id == str(current_user.id),
+            Artifact.case_id == str(case_obj_id),
+            Artifact.type == "ct_volume",
+        )
+        if not ct_artifact:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CT artifact not found for case")
+    else:
+        # Pick latest CT for case
+        ct_list = await (
+            Artifact.find(
+                Artifact.user_id == str(current_user.id),
+                Artifact.case_id == str(case_obj_id),
+                Artifact.type == "ct_volume",
+            )
+            .sort(-Artifact.created_at)
+            .limit(1)
+            .to_list()
+        )
+        ct_artifact = ct_list[0] if ct_list else None
+        if not ct_artifact:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No CT uploaded for this case yet",
+            )
+        ct_artifact_id = str(ct_artifact.id)
+
+    run = AnalysisRun(
+        user_id=str(current_user.id),
+        case_id=str(case_obj_id),
+        ct_artifact_id=str(ct_artifact_id),
+        pipeline=request.pipeline,
+        status="queued",
+        created_at=datetime.now(timezone.utc),
+    )
+    await run.insert()
+
+    # Fire-and-forget async processing (Phase 2 baseline).
+    asyncio.create_task(_process_analysis_run(str(run.id)))
+
+    return AnalysisRunResponse(
+        id=str(run.id),
+        case_id=run.case_id,
+        ct_artifact_id=run.ct_artifact_id,
+        pipeline=run.pipeline,
+        status=run.status,
+        progress=run.progress,
+        error=run.error,
+        outputs=run.outputs,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
+
+
+@app.get("/api/cases/{case_id}/analysis/{run_id}", response_model=AnalysisRunResponse)
+async def get_analysis_run(
+    case_id: str,
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        case_obj_id = ObjectId(case_id)
+        run_obj_id = ObjectId(run_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ID format")
+
+    run = await AnalysisRun.find_one(
+        AnalysisRun.id == run_obj_id,
+        AnalysisRun.user_id == str(current_user.id),
+        AnalysisRun.case_id == str(case_obj_id),
+    )
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
+
+    return AnalysisRunResponse(
+        id=str(run.id),
+        case_id=run.case_id,
+        ct_artifact_id=run.ct_artifact_id,
+        pipeline=run.pipeline,
+        status=run.status,
+        progress=run.progress,
+        error=run.error,
+        outputs=run.outputs,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
+
+
+@app.get("/api/cases/{case_id}/findings", response_model=List[FindingResponse])
+async def list_findings(
+    case_id: str,
+    run_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        case_obj_id = ObjectId(case_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid case ID format")
+
+    query = [
+        Finding.user_id == str(current_user.id),
+        Finding.case_id == str(case_obj_id),
+    ]
+    if run_id:
+        query.append(Finding.run_id == run_id)
+
+    findings = await Finding.find(*query).sort(-Finding.created_at).to_list()
+    return [
+        FindingResponse(
+            id=str(f.id),
+            run_id=f.run_id,
+            case_id=f.case_id,
+            label=f.label,
+            score=f.score,
+            centroid_world=f.centroid_world,
+            bbox_world=f.bbox_world,
+            volume_mm3=f.volume_mm3,
+            diameter_mm=f.diameter_mm,
+            mask_artifact_id=f.mask_artifact_id,
+            mesh_artifact_id=f.mesh_artifact_id,
+            created_at=f.created_at,
+        )
+        for f in findings
+    ]
 
 # Session management endpoints
 @app.post("/api/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)

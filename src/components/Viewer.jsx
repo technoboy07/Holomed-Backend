@@ -22,6 +22,12 @@ function getLoader(format) {
   }
 }
 
+function FindingMesh({ meshUrl }) {
+  const gltf = useLoader(GLTFLoader, meshUrl);
+  if (!gltf?.scene) return null;
+  return <primitive object={gltf.scene} />;
+}
+
 function findFirstMesh(node) {
   if (!node) return null;
 
@@ -214,7 +220,7 @@ function Model({ transform, modelPath, modelFormat, interactionMode, onSurfacePi
   );
 }
 
-export default function Viewer({ transform: initialTransform, modelPath, enableHandTracking = false, modelFormat = "stl" }) {
+export default function Viewer({ transform: initialTransform, modelPath, enableHandTracking = false, modelFormat = "stl", findingMeshes = [] }) {
   const [transform, setTransform] = useState(initialTransform || { pitch: 0, yaw: 0, scale: 1.5 });
   const [handTrackingEnabled, setHandTrackingEnabled] = useState(enableHandTracking);
   const [interactionMode, setInteractionMode] = useState("navigate");
@@ -694,6 +700,11 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
                 />
                 <MeasurementOverlay measurements={measurements} pendingPoint={pendingPoint} />
                 <AnnotationOverlay annotations={annotations} />
+                {Array.isArray(findingMeshes) && findingMeshes
+                  .filter((m) => m.visible && m.url)
+                  .map((m) => (
+                    <FindingMesh key={m.id} meshUrl={m.url} />
+                  ))}
               </Center>
             </Stage>
           </Suspense>

@@ -1,16 +1,45 @@
-# React + Vite
+# HoloMed
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+HoloMed is a medical visualization workspace with:
 
-Currently, two official plugins are available:
+- **Web 3D viewer** (Three.js / React Three Fiber) with **hand tracking** controls
+- **FastAPI backend** for authentication + artifact storage (currently 3D models)
+- **CT AI workflow (in progress)**: CT detection/segmentation → 3D overlays for patient explanation
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Repo layout
 
-## React Compiler hi
+- `src/`: frontend (Vite/React)
+- `backend/`: FastAPI backend
+- `ct-net-models/`: research CNN code for whole-volume chest CT abnormality prediction (classification)
+- `lung_nodule_ct_detection/`: MONAI bundle folder for 3D lung nodule detection (boxes)
+- `Basic_fucntionality_files/`: legacy desktop prototype + gesture reference
+- `docs/`: architecture + roadmap docs
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Run the current app
 
-## Expanding the ESLint configuration
+### Backend
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+Backend: `http://localhost:8000`  
+Docs: `http://localhost:8000/docs`
+
+### Frontend
+
+```bash
+npm install
+npm run dev
+```
+
+Frontend: `http://localhost:5173`
+
+## Roadmap (starting now)
+
+We are redesigning HoloMed around a **case → CT → findings → 3D overlays** workflow.
+
+- MVP scope: `docs/PHASE_0.md`
+

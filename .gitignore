@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Backend generated files / uploads
+backend/uploads/
+backend/*.db
+backend/__pycache__/
+backend/**/__pycache__/
+backend/venv/
+backend/ml_bundles/
+
+# Python virtualenvs
+.venv/
+venv/

@@ -41,12 +41,28 @@ function App() {
     }
   });
 
+  const [analysisCaseId, setAnalysisCaseId] = useState("");
+  const [analysisRunId, setAnalysisRunId] = useState("");
+  const [analysisFindings, setAnalysisFindings] = useState([]);
+  const [overlayMeshes, setOverlayMeshes] = useState([]);
+
   const clearSelectedModelUrl = useCallback(() => {
     setSelectedModelUrl((prevUrl) => {
       if (prevUrl) {
         URL.revokeObjectURL(prevUrl);
       }
       return null;
+    });
+  }, []);
+
+  const clearOverlayMeshes = useCallback(() => {
+    setOverlayMeshes((prev) => {
+      prev.forEach((m) => {
+        if (m.url) {
+          URL.revokeObjectURL(m.url);
+        }
+      });
+      return [];
     });
   }, []);
 
@@ -171,8 +187,9 @@ function App() {
   useEffect(() => {
     return () => {
       clearSelectedModelUrl();
+      clearOverlayMeshes();
     };
-  }, [clearSelectedModelUrl]);
+  }, [clearSelectedModelUrl, clearOverlayMeshes]);
 
   const handleLogin = (newToken, userData) => {
     setToken(newToken);
@@ -192,6 +209,10 @@ function App() {
     setSelectedModel(null);
     clearSelectedModelUrl();
     setModelFileError(null);
+    setAnalysisCaseId("");
+    setAnalysisRunId("");
+    setAnalysisFindings([]);
+    clearOverlayMeshes();
     setShowLogin(true);
     setServiceHealth("auth", "down");
     addToast({ type: "info", message: "Logged out successfully" });
@@ -282,6 +303,60 @@ function App() {
   const modelUrl = selectedModelUrl || null;
   const modelFormat = selectedModel?.file_format || "stl";
 
+  const loadFindingsAndMeshes = useCallback(async () => {
+    if (!token) {
+      addToast({ type: "error", message: "Login required to load findings" });
+      return;
+    }
+    if (!analysisCaseId || !analysisRunId) {
+      addToast({ type: "error", message: "Enter case ID and run ID" });
+      return;
+    }
+    try {
+      const encodedRunId = encodeURIComponent(analysisRunId);
+      const findings = await apiRequest(
+        API_BASE,
+        `/cases/${analysisCaseId}/findings?run_id=${encodedRunId}`,
+        { token }
+      );
+      setAnalysisFindings(findings);
+      clearOverlayMeshes();
+
+      const meshes = [];
+      for (const f of findings) {
+        if (!f.mesh_artifact_id) continue;
+        const blob = await apiRequest(
+          API_BASE,
+          `/artifacts/${f.mesh_artifact_id}/file`,
+          { token, responseType: "blob" }
+        );
+        const blobUrl = URL.createObjectURL(blob);
+        meshes.push({
+          id: f.id,
+          url: blobUrl,
+          label: f.label,
+          score: f.score,
+          visible: true,
+        });
+      }
+      setOverlayMeshes(meshes);
+      addToast({ type: "success", message: `Loaded ${meshes.length} finding overlays` });
+    } catch (err) {
+      console.error("Failed to load findings:", err);
+      const message = err.message || "Failed to load findings";
+      setError(message);
+      addToast({ type: "error", message });
+    }
+  }, [token, analysisCaseId, analysisRunId, clearOverlayMeshes, addToast]);
+
+  const toggleFindingVisibility = useCallback((findingId) => {
+    setOverlayMeshes((prev) =>
+      prev.map((m) =>
+        m.id === findingId ? { ...m, visible: !m.visible } : m
+      )
+    );
+  }, []);
+
   if (showLogin) {
     return (
       <div className="app-container">
@@ -342,6 +417,7 @@ function App() {
               modelPath={modelUrl}
               modelFormat={modelFormat}
               enableHandTracking={true}
+              findingMeshes={overlayMeshes}
             />
           ) : selectedModel && modelFileError ? (
             <div style={{
@@ -371,7 +447,19 @@ function App() {
             </div>
           )}
         </div>
-        {!presentationMode && <InfoPanel metrics={data.metrics} selectedModel={selectedModel} />}
+        {!presentationMode && (
+          <InfoPanel
+            metrics={data.metrics}
+            selectedModel={selectedModel}
+            findings={analysisFindings}
+            analysisCaseId={analysisCaseId}
+            analysisRunId={analysisRunId}
+            onChangeAnalysisCaseId={setAnalysisCaseId}
+            onChangeAnalysisRunId={setAnalysisRunId}
+            onLoadFindings={loadFindingsAndMeshes}
+            onToggleFinding={toggleFindingVisibility}
+          />
+        )}
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

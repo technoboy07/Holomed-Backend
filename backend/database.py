@@ -25,10 +25,10 @@ async def init_db():
         await client.admin.command('ping')
         
         # Initialize Beanie with the database
-        from models import User, Model3D, Session
+        from models import User, Model3D, Session, Case, Artifact, AnalysisRun, Finding
         await init_beanie(
             database=client[DATABASE_NAME],
-            document_models=[User, Model3D, Session]
+            document_models=[User, Model3D, Session, Case, Artifact, AnalysisRun, Finding]
         )
         
         print(f"Successfully connected to MongoDB database: {DATABASE_NAME}")
