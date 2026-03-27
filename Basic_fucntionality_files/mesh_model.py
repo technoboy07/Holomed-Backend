@@ -3,12 +3,11 @@ import mediapipe as mp
 import pyvista as pv
 import numpy as np
 import threading
-import time 
+import time
 import tkinter as tk
 from tkinter import filedialog
 from typing import Optional, Tuple
 from dataclasses import dataclass
-import os
 from pathlib import Path
 
 # --- Configuration ---
@@ -22,7 +21,7 @@ class Config:
     
     # Rendering settings
     BG_DISTANCE = 20.0  # How far back the camera plane sits
-    DEFAULT_COLOR = "lightgray"  # Fallback color for models without textures
+    #DEFAULT_COLOR = "lightgray"Fallback color for models without textures
 
 @dataclass
 class SharedState:
@@ -139,41 +138,27 @@ class JarvisVisualizer:
         self.plotter.set_background('black')
         self.plotter.disable()
         
-        # 2. Load Model with Fallback
-        self.mesh, self.texture = self.load_and_normalize_mesh(model_path)
+        # 2. Load Model with Fallback (mesh only, no textures)
+        self.mesh = self.load_and_normalize_mesh(model_path)
 
-        # 3. Display model with original texture
-        if self.texture is not None:
-            # Model has texture - apply it
-            self.actor = self.plotter.add_mesh(
-                self.mesh,
-                texture=self.texture,
-                style='surface',
-                show_edges=False,
-                lighting=True,
-                smooth_shading=True
-            )
-            print("✓ Loaded model with texture")
-        else:
-            # No texture - use default material
-            self.actor = self.plotter.add_mesh(
-                self.mesh,
-                color=Config.DEFAULT_COLOR,
-                style='surface',
-                show_edges=False,
-                lighting=True,
-                smooth_shading=True
-            )
-            print("✓ Loaded model without texture (using default material)")
+        # 3. Display model (solid color)
+        self.actor = self.plotter.add_mesh(
+            self.mesh,
+            # color=Config.DEFAULT_COLOR,
+            style='surface',
+            show_edges=False,
+            lighting=True,
+            smooth_shading=True
+        )
+        print("✓ Loaded model")
 
         # 4. AR Background Plane
         self.bg_plane = pv.Plane(
-            center=(0, 0, -Config.BG_DISTANCE), 
-            direction=(0, 0, 1), 
+            center=(0, 0, -Config.BG_DISTANCE),
+            direction=(0, 0, 1),
             i_size=32, j_size=18
         )
         self.bg_actor = self.plotter.add_mesh(self.bg_plane, lighting=False)
-        self.bg_texture = None
 
         # Camera setup
         self.plotter.camera.position = (0, 0, 10)
@@ -192,7 +177,7 @@ class JarvisVisualizer:
         
         print("Waiting for file selection...")
         file_path = filedialog.askopenfilename(
-            title="Select 3D Model with Texture",
+            title="Select 3D Model",
             filetypes=[
                 ("3D Models", "*.stl *.obj *.ply *.vtk *.glb *.gltf *.fbx"),
                 ("OBJ Files", "*.obj"),
@@ -204,150 +189,32 @@ class JarvisVisualizer:
         return file_path
 
     def load_and_normalize_mesh(self, path: str):
-        """Loads a mesh with texture and forces it to a standard size/position."""
-        texture = None
-        
+        """Loads a mesh and forces it to a standard size/position. No textures."""
         try:
             if not path:
                 raise ValueError("No file selected")
-                
             print(f"Loading: {path}")
-            
-            # Try to load mesh with texture support
-            if path.lower().endswith('.obj'):
-                # OBJ files may have textures - try to load them
-                mesh, texture = self.load_obj_with_texture(path)
-            else:
-                # For other formats, try standard loading
-                mesh = pv.read(path)
-                # Check if mesh has texture coordinates
-                if hasattr(mesh, 'texture_coordinates') and mesh.texture_coordinates is not None:
-                    texture = self.load_texture_from_path(path)
-                    
+            mesh = pv.read(path)
         except Exception as e:
             print(f"⚠️ Could not load custom file: {e}")
             print("↺ Reverting to Default Brain Model")
             mesh = pv.examples.download_brain()
-            texture = None
 
-        # Normalization Routine
-        # 1. Center at origin
+        # Normalization: center at origin
         mesh.translate(-np.array(mesh.center), inplace=True)
-        
-        # 2. Rotate 90 degrees if it's an OBJ (often they come in lying down)
+        # Rotate 90 degrees if OBJ (often lying down)
         if path and path.lower().endswith('.obj'):
             mesh.rotate_x(-90, inplace=True)
-
-        # 3. Scale to fit screen (target size ~10 units)
+        # Scale to fit screen
         bounds = mesh.bounds
         max_dim = max(
-            bounds[1] - bounds[0], 
-            bounds[3] - bounds[2], 
+            bounds[1] - bounds[0],
+            bounds[3] - bounds[2],
             bounds[5] - bounds[4]
         )
-        
         if max_dim > 0:
-            scale_factor = 5.0 / max_dim
-            mesh.scale(scale_factor, inplace=True)
-            
-        return mesh, texture
-    
-    def load_obj_with_texture(self, obj_path: str):
-        """Loads OBJ file and attempts to load associated texture files."""
-        mesh = pv.read(obj_path)
-        texture = None
-        
-        # OBJ files often have associated .mtl files and texture images
-        obj_dir = Path(obj_path).parent
-        obj_name = Path(obj_path).stem
-        
-        # Common texture file extensions
-        texture_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tga', '.tiff']
-        
-        # Try to find texture files in the same directory
-        for ext in texture_extensions:
-            # Try various naming conventions
-            possible_names = [
-                obj_name + ext,
-                obj_name + '_texture' + ext,
-                obj_name + '_diffuse' + ext,
-                'texture' + ext,
-                'diffuse' + ext,
-            ]
-            
-            for tex_name in possible_names:
-                tex_path = obj_dir / tex_name
-                if tex_path.exists():
-                    try:
-                        texture = pv.read_texture(str(tex_path))
-                        print(f"✓ Found texture: {tex_path}")
-                        return mesh, texture
-                    except Exception as e:
-                        print(f"⚠️ Could not load texture {tex_path}: {e}")
-                        continue
-        
-        # Try loading from MTL file if it exists
-        mtl_path = obj_dir / (obj_name + '.mtl')
-        if mtl_path.exists():
-            texture = self.load_texture_from_mtl(str(mtl_path), obj_dir)
-            if texture is not None:
-                return mesh, texture
-        
-        # Check if mesh already has texture coordinates but no texture loaded
-        if hasattr(mesh, 'texture_coordinates') and mesh.texture_coordinates is not None:
-            # Try to find any image file in the directory
-            for img_file in obj_dir.glob('*.png'):
-                try:
-                    texture = pv.read_texture(str(img_file))
-                    print(f"✓ Found texture: {img_file}")
-                    return mesh, texture
-                except:
-                    continue
-            for img_file in obj_dir.glob('*.jpg'):
-                try:
-                    texture = pv.read_texture(str(img_file))
-                    print(f"✓ Found texture: {img_file}")
-                    return mesh, texture
-                except:
-                    continue
-        
-        return mesh, None
-    
-    def load_texture_from_mtl(self, mtl_path: str, obj_dir: Path):
-        """Attempts to load texture referenced in MTL file."""
-        try:
-            with open(mtl_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    # Look for map_Kd (diffuse texture) or map_Ka (ambient texture)
-                    if line.startswith('map_Kd') or line.startswith('map_Ka'):
-                        tex_file = line.split()[-1]
-                        # Handle relative paths
-                        tex_path = obj_dir / tex_file
-                        if tex_path.exists():
-                            return pv.read_texture(str(tex_path))
-                        # Try with just filename if path doesn't work
-                        tex_path = obj_dir / Path(tex_file).name
-                        if tex_path.exists():
-                            return pv.read_texture(str(tex_path))
-        except Exception as e:
-            print(f"⚠️ Error reading MTL file: {e}")
-        return None
-    
-    def load_texture_from_path(self, model_path: str):
-        """Attempts to find and load texture file based on model path."""
-        model_dir = Path(model_path).parent
-        model_name = Path(model_path).stem
-        
-        texture_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tga']
-        for ext in texture_extensions:
-            tex_path = model_dir / (model_name + ext)
-            if tex_path.exists():
-                try:
-                    return pv.read_texture(str(tex_path))
-                except:
-                    continue
-        return None
+            mesh.scale(5.0 / max_dim, inplace=True)
+        return mesh
 
     def update_loop(self):
         # ... (Keep the exact same update logic from previous response) ...
