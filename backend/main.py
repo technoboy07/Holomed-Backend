@@ -47,6 +47,7 @@ from schemas import (
     AnalyzeRequest,
     AnalysisRunResponse,
     FindingResponse,
+    VolumeRenderMetaResponse,
 )
 
 # Lifespan events for database connection
@@ -136,6 +137,13 @@ os.makedirs(ct_upload_dir, exist_ok=True)
 derived_upload_dir = os.path.join(upload_dir, "derived")
 os.makedirs(derived_upload_dir, exist_ok=True)
 
+# Simple static mount for local holomed-ai outputs (brain.glb / tumor.glb).
+ai_output_dir = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "holomed-ai", "output")
+)
+os.makedirs(ai_output_dir, exist_ok=True)
+app.mount("/ai-output", StaticFiles(directory=ai_output_dir), name="ai-output")
+
 
 async def _process_analysis_run(run_id: str):
     """Best-effort async background processing for a single analysis run.
@@ -158,6 +166,55 @@ async def _process_analysis_run(run_id: str):
         ct_artifact = await Artifact.get(ObjectId(run.ct_artifact_id))
         if not ct_artifact or ct_artifact.user_id != run.user_id:
             raise RuntimeError("CT artifact not found for this run")
+
+        # --- Brain volumetric pipeline (NIfTI → raw float32 + meta, no MONAI) ---
+        if run.pipeline == "brain_volume_v1":
+            from holomed_brain.persist_volumes import (
+                persist_volume_render_artifacts,
+                persist_brain_mesh_finding,
+            )
+
+            backend_dir = os.path.abspath(os.path.dirname(__file__))
+            default_runner_py = os.path.join(backend_dir, "venv", "Scripts", "python.exe")
+            runner_py = os.getenv("HOLOMED_CT_PYTHON") or (
+                default_runner_py if os.path.exists(default_runner_py) else sys.executable
+            )
+
+            run_dir = os.path.join(derived_upload_dir, f"case_{run.case_id}_run_{run_id}")
+            os.makedirs(run_dir, exist_ok=True)
+
+            env = os.environ.copy()
+            env["PYTHONPATH"] = backend_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+            cmd = [
+                runner_py,
+                "-m",
+                "holomed_brain.volume_runner",
+                "--ct",
+                ct_artifact.file_path,
+                "--out-dir",
+                run_dir,
+                "--max-edge",
+                "128",
+            ]
+            completed = subprocess.run(cmd, cwd=backend_dir, env=env, capture_output=True, text=True)
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    "Brain volume runner failed. "
+                    f"stderr: {completed.stderr[-2000:]}"
+                )
+
+            run.progress = 0.9
+            await run.save()
+
+            vr_outputs = await persist_volume_render_artifacts(run=run, run_dir=run_dir)
+            mesh_outputs = await persist_brain_mesh_finding(run=run, run_dir=run_dir)
+            run.status = "succeeded"
+            run.progress = 1.0
+            run.finished_at = datetime.now(timezone.utc)
+            run.outputs = {**vr_outputs, **mesh_outputs}
+            await run.save()
+            return
 
         from holomed_ct.pipeline import CtFinding, persist_findings_as_artifacts
 
@@ -197,9 +254,23 @@ async def _process_analysis_run(run_id: str):
 
         completed = subprocess.run(cmd, cwd=backend_dir, env=env, capture_output=True, text=True)
         if completed.returncode != 0:
+            stderr_tail = (completed.stderr or "")[-4000:]
+            stdout_tail = (completed.stdout or "")[-2000:]
+            warning_only = (
+                "FutureWarning" in stderr_tail
+                and "Traceback" not in stderr_tail
+                and not stdout_tail.strip()
+            )
+            hint = (
+                " Hint: nodule_seg_v1 targets lung nodule bundle and may fail on brain CT. "
+                "Use pipeline=brain_volume_v1 for brain workflow."
+                if warning_only
+                else ""
+            )
             raise RuntimeError(
-                "CT runner failed. Ensure the runner Python has MONAI+torch installed. "
-                f"stderr: {completed.stderr[-2000:]}"
+                "CT runner failed. "
+                f"stderr: {stderr_tail}\n"
+                f"stdout: {stdout_tail}{hint}"
             )
 
         with open(runner_out_json, "r", encoding="utf-8") as f:
@@ -784,6 +855,88 @@ async def get_analysis_run(
         finished_at=run.finished_at,
         created_at=run.created_at,
     )
+
+
+async def _volume_render_context(case_id: str, run_id: str, current_user: User):
+    """Validate case/run and return (run, volume_render dict) or raise HTTPException."""
+    try:
+        case_obj_id = ObjectId(case_id)
+        run_obj_id = ObjectId(run_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ID format")
+
+    run = await AnalysisRun.find_one(
+        AnalysisRun.id == run_obj_id,
+        AnalysisRun.user_id == str(current_user.id),
+        AnalysisRun.case_id == str(case_obj_id),
+    )
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
+
+    if run.status != "succeeded":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Analysis run has not completed successfully yet",
+        )
+    vr = (run.outputs or {}).get("volume_render")
+    if not vr:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No volumetric output for this run (use brain_volume_v1 pipeline)",
+        )
+    return run, vr
+
+
+@app.get("/api/cases/{case_id}/volumes/{run_id}", response_model=VolumeRenderMetaResponse)
+async def get_volume_render_meta(
+    case_id: str,
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    _, vr = await _volume_render_context(case_id, run_id, current_user)
+    try:
+        meta_art = await Artifact.get(ObjectId(vr["meta_artifact_id"]))
+    except Exception:
+        meta_art = None
+    if not meta_art or meta_art.user_id != str(current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volume metadata artifact missing")
+
+    if not os.path.exists(meta_art.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Volume metadata file not found")
+
+    with open(meta_art.file_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return VolumeRenderMetaResponse(**payload)
+
+
+@app.get("/api/cases/{case_id}/volumes/{run_id}/intensity")
+async def get_volume_intensity_raw(
+    case_id: str,
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    _, vr = await _volume_render_context(case_id, run_id, current_user)
+    art = await Artifact.get(ObjectId(vr["intensity_artifact_id"]))
+    if not art or art.user_id != str(current_user.id) or art.type != "intensity_volume":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intensity volume not found")
+    if not os.path.exists(art.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intensity file missing on server")
+    return FileResponse(art.file_path, media_type="application/octet-stream", filename="intensity_f32.raw")
+
+
+@app.get("/api/cases/{case_id}/volumes/{run_id}/tumor")
+async def get_volume_tumor_raw(
+    case_id: str,
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    _, vr = await _volume_render_context(case_id, run_id, current_user)
+    art = await Artifact.get(ObjectId(vr["tumor_mask_artifact_id"]))
+    if not art or art.user_id != str(current_user.id) or art.type != "mask_volume":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tumor mask volume not found")
+    if not os.path.exists(art.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tumor mask file missing on server")
+    return FileResponse(art.file_path, media_type="application/octet-stream", filename="tumor_f32.raw")
 
 
 @app.get("/api/cases/{case_id}/findings", response_model=List[FindingResponse])

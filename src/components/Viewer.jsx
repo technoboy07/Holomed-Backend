@@ -8,6 +8,9 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader";
 import { VTKLoader } from "three/examples/jsm/loaders/VTKLoader";
 import { Stage, Center, OrbitControls, Line, Html } from "@react-three/drei";
 import { useHandTracking } from "../hooks/useHandTracking";
+import { VolumeRaycastMesh } from "./VolumeRaycast";
+
+const AI_OVERLAY_ZOOM_THRESHOLD = 1.25;
 
 function getLoader(format) {
   const ext = format?.toLowerCase();
@@ -22,7 +25,8 @@ function getLoader(format) {
   }
 }
 
-function FindingMesh({ meshUrl }) {
+function FindingMesh({ meshUrl, visible = true }) {
+  if (!visible) return null;
   const gltf = useLoader(GLTFLoader, meshUrl);
   if (!gltf?.scene) return null;
   return <primitive object={gltf.scene} />;
@@ -166,12 +170,9 @@ function Model({ transform, modelPath, modelFormat, interactionMode, onSurfacePi
 
     try {
       if (format === 'gltf' || format === 'glb') {
-        // GLTFLoader returns a scene, extract the first mesh
+        // GLTFLoader returns a full scene graph; render it directly.
         if (modelData?.scene) {
-          const mesh = findFirstMesh(modelData.scene);
-          if (mesh?.geometry) {
-            return { geometry: mesh.geometry, object: null };
-          }
+          return { geometry: null, object: modelData.scene.clone(true) };
         }
         return { geometry: null, object: null };
       } else if (format === 'obj') {
@@ -204,6 +205,22 @@ function Model({ transform, modelPath, modelFormat, interactionMode, onSurfacePi
     );
   }
 
+  if (renderData.object) {
+    return (
+      <group
+        rotation={[transform.pitch * Math.PI / 180, transform.yaw * Math.PI / 180, 0]}
+        scale={[transform.scale, transform.scale, transform.scale]}
+        onPointerDown={(event) => {
+          if (interactionMode === "navigate" || !onSurfacePick) return;
+          event.stopPropagation();
+          onSurfacePick(event.point);
+        }}
+      >
+        <primitive object={renderData.object} />
+      </group>
+    );
+  }
+
   return (
     <mesh
       geometry={renderData.geometry}
@@ -220,7 +237,15 @@ function Model({ transform, modelPath, modelFormat, interactionMode, onSurfacePi
   );
 }
 
-export default function Viewer({ transform: initialTransform, modelPath, enableHandTracking = false, modelFormat = "stl", findingMeshes = [] }) {
+export default function Viewer({
+  transform: initialTransform,
+  modelPath,
+  enableHandTracking = false,
+  modelFormat = "stl",
+  findingMeshes = [],
+  volumeData = null,
+  volumeClipY = 10,
+}) {
   const [transform, setTransform] = useState(initialTransform || { pitch: 0, yaw: 0, scale: 1.5 });
   const [handTrackingEnabled, setHandTrackingEnabled] = useState(enableHandTracking);
   const [interactionMode, setInteractionMode] = useState("navigate");
@@ -229,6 +254,8 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
   const [annotations, setAnnotations] = useState([]);
   const [annotationDraft, setAnnotationDraft] = useState("Clinical note");
   const [toolsHost, setToolsHost] = useState(null);
+  const aiOverlayVisible = transform.scale >= AI_OVERLAY_ZOOM_THRESHOLD;
+  const hasFindingOverlays = Array.isArray(findingMeshes) && findingMeshes.some((m) => m?.url);
 
   const handleGesture = useCallback((gestureData) => {
     if (handTrackingEnabled) {
@@ -283,7 +310,7 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
     setMeasurements([]);
     setAnnotations([]);
     setPendingPoint(null);
-  }, [modelPath]);
+  }, [modelPath, volumeData]);
 
   useEffect(() => {
     setToolsHost(document.getElementById("clinical-tools-host"));
@@ -391,7 +418,7 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
             ? (pendingPoint ? "Pick second point on model..." : "Pick first point on model...")
             : interactionMode === "annotate"
               ? "Click model to place annotation pin"
-              : "Use mouse controls to inspect model"}
+              : "Pinch+drag to rotate, pinch open/close to zoom, or use mouse controls"}
         </div>
         <div style={{ borderTop: "1px solid #415a77", paddingTop: 8 }}>
           <strong style={{ fontSize: 12 }}>Measurements</strong>
@@ -676,13 +703,68 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
           )}
         </div>
       )}
+
+      {hasFindingOverlays && !aiOverlayVisible && (
+        <div
+          style={{
+            position: "absolute",
+            left: 12,
+            bottom: 12,
+            zIndex: 12,
+            background: "rgba(10, 18, 30, 0.88)",
+            color: "#e0e1dd",
+            border: "1px solid #415a77",
+            borderRadius: 6,
+            padding: "8px 10px",
+            fontSize: 12,
+          }}
+        >
+          Zoom in to view AI GLB overlay
+        </div>
+      )}
       
       <Canvas style={{ width: "100%", height: "100%" }} camera={{ position: [0, 0, 10], fov: 45 }}>
         <ambientLight intensity={0.5} />
         <pointLight position={[10, 10, 10]} />
         <pointLight position={[-10, -10, -10]} intensity={0.3} />
 
-        {modelPath ? (
+        {volumeData ? (
+          <Suspense
+            fallback={
+              <mesh>
+                <boxGeometry args={[2, 2, 2]} />
+                <meshStandardMaterial color="#778da9" />
+              </mesh>
+            }
+          >
+            <Stage environment="city" intensity={0.55}>
+              <Center>
+                <group
+                  rotation={[
+                    (transform.pitch * Math.PI) / 180,
+                    (transform.yaw * Math.PI) / 180,
+                    0,
+                  ]}
+                  scale={[
+                    transform.scale,
+                    transform.scale,
+                    transform.scale,
+                  ]}
+                >
+                  <VolumeRaycastMesh
+                    nx={volumeData.nx}
+                    ny={volumeData.ny}
+                    nz={volumeData.nz}
+                    spacingMm={volumeData.spacing_mm}
+                    intensity={volumeData.intensity}
+                    tumor={volumeData.tumor}
+                    clipLocalY={volumeClipY}
+                  />
+                </group>
+              </Center>
+            </Stage>
+          </Suspense>
+        ) : modelPath ? (
           <Suspense fallback={
             <mesh>
               <boxGeometry args={[2, 2, 2]} />
@@ -703,7 +785,7 @@ export default function Viewer({ transform: initialTransform, modelPath, enableH
                 {Array.isArray(findingMeshes) && findingMeshes
                   .filter((m) => m.visible && m.url)
                   .map((m) => (
-                    <FindingMesh key={m.id} meshUrl={m.url} />
+                    <FindingMesh key={m.id} meshUrl={m.url} visible={aiOverlayVisible} />
                   ))}
               </Center>
             </Stage>

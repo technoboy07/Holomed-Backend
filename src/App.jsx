@@ -10,6 +10,7 @@ import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
 const API_ROOT = API_BASE.replace(/\/api\/?$/, "");
+const AI_OUTPUT_BASE = `${API_ROOT}/ai-output`;
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -45,6 +46,12 @@ function App() {
   const [analysisRunId, setAnalysisRunId] = useState("");
   const [analysisFindings, setAnalysisFindings] = useState([]);
   const [overlayMeshes, setOverlayMeshes] = useState([]);
+  const [analysisPipeline, setAnalysisPipeline] = useState("brain_volume_v1");
+  const [displayMode, setDisplayMode] = useState("volume");
+  const [volumeRenderData, setVolumeRenderData] = useState(null);
+  const [volumeLoading, setVolumeLoading] = useState(false);
+  const [volumeClipY, setVolumeClipY] = useState(10);
+  const [analysisPolling, setAnalysisPolling] = useState(false);
 
   const clearSelectedModelUrl = useCallback(() => {
     setSelectedModelUrl((prevUrl) => {
@@ -213,6 +220,8 @@ function App() {
     setAnalysisRunId("");
     setAnalysisFindings([]);
     clearOverlayMeshes();
+    setVolumeRenderData(null);
+    setVolumeClipY(10);
     setShowLogin(true);
     setServiceHealth("auth", "down");
     addToast({ type: "info", message: "Logged out successfully" });
@@ -266,6 +275,17 @@ function App() {
     setServiceHealth("model", "unknown");
     await loadModelFile(model);
   };
+
+  useEffect(() => {
+    if (!token) return;
+    if (selectedModel || loadingModels || models.length === 0) return;
+
+    // Auto-load the first model so users don't land on an empty viewer.
+    const firstModel = models[0];
+    setSelectedModel(firstModel);
+    loadModelFile(firstModel);
+    addToast({ type: "info", message: `Auto-loaded model: ${firstModel.name}` });
+  }, [token, selectedModel, loadingModels, models, loadModelFile, addToast]);
 
   const handleDeleteModel = async (model) => {
     if (!model?.id || !token) return;
@@ -340,14 +360,29 @@ function App() {
         });
       }
       setOverlayMeshes(meshes);
-      addToast({ type: "success", message: `Loaded ${meshes.length} finding overlays` });
+      if (meshes.length) {
+        setDisplayMode("mesh");
+        setVolumeRenderData(null);
+        setVolumeClipY(10);
+        addToast({
+          type: "success",
+          message: `Loaded ${meshes.length} AI overlays. Switched to Mesh Overlay mode.`,
+        });
+      } else if (analysisPipeline === "brain_volume_v1") {
+        addToast({
+          type: "info",
+          message: "No mesh overlays for brain_volume_v1. Use 'Load volumetric CT viewer' for this pipeline.",
+        });
+      } else {
+        addToast({ type: "info", message: "No AI overlays found for this run" });
+      }
     } catch (err) {
       console.error("Failed to load findings:", err);
       const message = err.message || "Failed to load findings";
       setError(message);
       addToast({ type: "error", message });
     }
-  }, [token, analysisCaseId, analysisRunId, clearOverlayMeshes, addToast]);
+  }, [token, analysisCaseId, analysisRunId, clearOverlayMeshes, addToast, analysisPipeline]);
 
   const toggleFindingVisibility = useCallback((findingId) => {
     setOverlayMeshes((prev) =>
@@ -356,6 +391,179 @@ function App() {
       )
     );
   }, []);
+
+  const loadVolumeRender = useCallback(async () => {
+    if (!token) {
+      addToast({ type: "error", message: "Login required" });
+      return;
+    }
+    if (!analysisCaseId?.trim() || !analysisRunId?.trim()) {
+      addToast({ type: "error", message: "Enter case ID and run ID" });
+      return;
+    }
+    const cid = analysisCaseId.trim();
+    const rid = analysisRunId.trim();
+    setVolumeLoading(true);
+    try {
+      const meta = await apiRequest(API_BASE, `/cases/${cid}/volumes/${rid}`, {
+        token,
+      });
+      const intBlob = await apiRequest(
+        API_BASE,
+        `/cases/${cid}/volumes/${rid}/intensity`,
+        { token, responseType: "blob" }
+      );
+      const tumorBlob = await apiRequest(
+        API_BASE,
+        `/cases/${cid}/volumes/${rid}/tumor`,
+        { token, responseType: "blob" }
+      );
+      const intBuf = new Float32Array(await intBlob.arrayBuffer());
+      const tumorBuf = new Float32Array(await tumorBlob.arrayBuffer());
+      const expected = meta.nx * meta.ny * meta.nz;
+      if (intBuf.length !== expected || tumorBuf.length !== expected) {
+        throw new Error(
+          `Buffer size mismatch (expected ${expected} floats each)`
+        );
+      }
+      setVolumeRenderData({
+        nx: meta.nx,
+        ny: meta.ny,
+        nz: meta.nz,
+        spacing_mm: meta.spacing_mm,
+        intensity: intBuf,
+        tumor: tumorBuf,
+      });
+      // Start with minimal clipping so users can actually see the full volume immediately.
+      setVolumeClipY(0.55);
+      setDisplayMode("volume");
+      addToast({ type: "success", message: "Volumetric CT loaded. Switched to Volume CT mode." });
+    } catch (err) {
+      console.error("Volume load failed:", err);
+      const message = err.message || "Failed to load volume data";
+      setError(message);
+      addToast({ type: "error", message });
+    } finally {
+      setVolumeLoading(false);
+    }
+  }, [token, analysisCaseId, analysisRunId, addToast]);
+
+  const runCaseAnalysis = useCallback(async () => {
+    if (!token) {
+      addToast({ type: "error", message: "Login required" });
+      return;
+    }
+    if (!analysisCaseId?.trim()) {
+      addToast({ type: "error", message: "Enter case ID" });
+      return;
+    }
+    const cid = analysisCaseId.trim();
+    try {
+      const res = await apiRequest(API_BASE, `/cases/${cid}/analyze`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipeline: analysisPipeline }),
+      });
+      setAnalysisRunId(res.id);
+      addToast({
+        type: "info",
+        message: `Analysis queued (run ${res.id}). Poll until succeeded, then load volume.`,
+      });
+    } catch (err) {
+      console.error("Analyze failed:", err);
+      const message = err.message || "Failed to start analysis";
+      addToast({ type: "error", message });
+    }
+  }, [token, analysisCaseId, analysisPipeline, addToast]);
+
+  const loadSimpleAiOutputs = useCallback(async () => {
+    try {
+      setLoadingModelFile(true);
+      clearSelectedModelUrl();
+      clearOverlayMeshes();
+      setModelFileError(null);
+      setVolumeRenderData(null);
+      setVolumeClipY(10);
+      setDisplayMode("mesh");
+
+      const [brainRes, tumorRes] = await Promise.all([
+        fetch(`${AI_OUTPUT_BASE}/brain.glb`),
+        fetch(`${AI_OUTPUT_BASE}/tumor.glb`),
+      ]);
+
+      if (!brainRes.ok) {
+        throw new Error("brain.glb not found in holomed-ai/output");
+      }
+      if (!tumorRes.ok) {
+        throw new Error("tumor.glb not found in holomed-ai/output");
+      }
+
+      const brainBlob = await brainRes.blob();
+      const tumorBlob = await tumorRes.blob();
+      const brainUrl = URL.createObjectURL(brainBlob);
+      const tumorUrl = URL.createObjectURL(tumorBlob);
+
+      setSelectedModel({
+        id: "ai-brain-local",
+        name: "AI Brain Output",
+        file_format: "glb",
+        created_at: new Date().toISOString(),
+      });
+      setSelectedModelUrl(brainUrl);
+      setOverlayMeshes([
+        { id: "ai-tumor-overlay", url: tumorUrl, label: "tumor", score: 1, visible: true },
+      ]);
+      addToast({ type: "success", message: "Loaded brain.glb + tumor.glb from holomed-ai/output" });
+    } catch (err) {
+      const message = err.message || "Failed to load files from holomed-ai/output";
+      setModelFileError(message);
+      addToast({ type: "error", message });
+    } finally {
+      setLoadingModelFile(false);
+    }
+  }, [clearSelectedModelUrl, clearOverlayMeshes, addToast]);
+
+  useEffect(() => {
+    if (displayMode !== "mesh") return;
+    if (!volumeRenderData) return;
+    setVolumeRenderData(null);
+    setVolumeClipY(10);
+  }, [displayMode, volumeRenderData]);
+
+  const pollAnalysisRun = useCallback(async () => {
+    if (!token || !analysisCaseId?.trim() || !analysisRunId?.trim()) {
+      addToast({ type: "error", message: "Enter case ID and run ID" });
+      return;
+    }
+    const cid = analysisCaseId.trim();
+    const rid = analysisRunId.trim();
+    setAnalysisPolling(true);
+    try {
+      for (let i = 0; i < 60; i++) {
+        const run = await apiRequest(API_BASE, `/cases/${cid}/analysis/${rid}`, {
+          token,
+        });
+        if (run.status === "succeeded") {
+          addToast({ type: "success", message: "Analysis finished" });
+          return;
+        }
+        if (run.status === "failed") {
+          addToast({
+            type: "error",
+            message: run.error || "Analysis failed",
+          });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      addToast({ type: "error", message: "Polling timed out; check run status manually" });
+    } catch (err) {
+      addToast({ type: "error", message: err.message || "Poll failed" });
+    } finally {
+      setAnalysisPolling(false);
+    }
+  }, [token, analysisCaseId, analysisRunId, addToast]);
 
   if (showLogin) {
     return (
@@ -397,7 +605,7 @@ function App() {
         )}
 
         <div className="viewer-container">
-          {loadingModelFile && (
+          {(loadingModelFile || volumeLoading) && (
             <div style={{
               position: 'absolute',
               top: 10,
@@ -408,16 +616,18 @@ function App() {
               borderRadius: '4px',
               zIndex: 1000
             }}>
-              Loading model...
+              {volumeLoading ? "Loading CT volume…" : "Loading model..."}
             </div>
           )}
-          {modelUrl ? (
+          {volumeRenderData || modelUrl ? (
             <Viewer 
               transform={data.transform} 
-              modelPath={modelUrl}
+              modelPath={displayMode === "volume" && volumeRenderData ? null : modelUrl}
               modelFormat={modelFormat}
               enableHandTracking={true}
               findingMeshes={overlayMeshes}
+              volumeData={displayMode === "volume" ? volumeRenderData : null}
+              volumeClipY={volumeClipY}
             />
           ) : selectedModel && modelFileError ? (
             <div style={{
@@ -443,7 +653,8 @@ function App() {
             </div>
           ) : (
             <div className="viewer-empty">
-              No model selected. Click "+ Add Model" to load a 3D model from your computer.
+              No model in view. Use "Load AI Output Files" in the insights panel to load
+              brain.glb and tumor.glb directly from holomed-ai/output.
             </div>
           )}
         </div>
@@ -458,6 +669,23 @@ function App() {
             onChangeAnalysisRunId={setAnalysisRunId}
             onLoadFindings={loadFindingsAndMeshes}
             onToggleFinding={toggleFindingVisibility}
+            analysisPipeline={analysisPipeline}
+            onChangeAnalysisPipeline={setAnalysisPipeline}
+            onRunCaseAnalysis={runCaseAnalysis}
+            onPollAnalysis={pollAnalysisRun}
+            analysisPolling={analysisPolling}
+            onLoadVolumeRender={loadVolumeRender}
+            volumeLoading={volumeLoading}
+            volumeActive={displayMode === "volume" && !!volumeRenderData}
+            volumeClipY={volumeClipY}
+            displayMode={displayMode}
+            onChangeDisplayMode={setDisplayMode}
+            onLoadSimpleAiOutputs={loadSimpleAiOutputs}
+            onVolumeClipYChange={setVolumeClipY}
+            onClearVolumeView={() => {
+              setVolumeRenderData(null);
+              setVolumeClipY(10);
+            }}
           />
         )}
       </div>

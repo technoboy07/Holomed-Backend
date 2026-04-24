@@ -8,6 +8,20 @@ export default function InfoPanel({
   onChangeAnalysisRunId,
   onLoadFindings,
   onToggleFinding,
+  analysisPipeline = "brain_volume_v1",
+  onChangeAnalysisPipeline,
+  onRunCaseAnalysis,
+  onPollAnalysis,
+  analysisPolling = false,
+  onLoadVolumeRender,
+  onLoadSimpleAiOutputs,
+  volumeLoading = false,
+  volumeActive = false,
+  volumeClipY = 10,
+  displayMode = "volume",
+  onChangeDisplayMode,
+  onVolumeClipYChange,
+  onClearVolumeView,
 }) {
   const formatDate = (isoDate) => {
     if (!isoDate) return "--";
@@ -64,35 +78,56 @@ export default function InfoPanel({
       </div>
 
       <div className="insights-card">
-        <h4>AI Findings (CT)</h4>
-        <div className="insight-row">
-          <span>Case ID</span>
-          <input
-            className="insight-input"
-            placeholder="Paste case_id"
-            value={analysisCaseId || ""}
-            onChange={(e) =>
-              onChangeAnalysisCaseId && onChangeAnalysisCaseId(e.target.value)
-            }
-          />
+        <h4>Simple AI Output</h4>
+        <div className="insight-row" style={{ alignItems: "flex-start", flexDirection: "column", gap: 6 }}>
+          <span>Display Mode</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className="insight-btn secondary"
+              style={{ opacity: displayMode === "mesh" ? 1 : 0.75 }}
+              onClick={() => onChangeDisplayMode && onChangeDisplayMode("mesh")}
+            >
+              Mesh Overlay
+            </button>
+            <button
+              type="button"
+              className="insight-btn"
+              style={{ opacity: displayMode === "volume" ? 1 : 0.75 }}
+              onClick={() => onChangeDisplayMode && onChangeDisplayMode("volume")}
+            >
+              Volume CT
+            </button>
+          </div>
         </div>
-        <div className="insight-row">
-          <span>Run ID</span>
-          <input
-            className="insight-input"
-            placeholder="Paste run_id"
-            value={analysisRunId || ""}
-            onChange={(e) =>
-              onChangeAnalysisRunId && onChangeAnalysisRunId(e.target.value)
-            }
-          />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+          <button
+            type="button"
+            className="insight-btn"
+            onClick={() => onLoadSimpleAiOutputs && onLoadSimpleAiOutputs()}
+          >
+            Load AI Output Files (brain.glb + tumor.glb)
+          </button>
+          <p style={{ margin: 0, fontSize: 11, color: "#778da9", lineHeight: 1.4 }}>
+            This loads files directly from <strong>holomed-ai/output</strong> with no case ID or run ID.
+          </p>
         </div>
-        <button
-          className="insight-btn"
-          onClick={() => onLoadFindings && onLoadFindings()}
-        >
-          Load Findings & Overlays
-        </button>
+        {volumeActive && onVolumeClipYChange && (
+          <div className="insight-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+            <span>Horizontal clip (remove tissue above Y)</span>
+            <input
+              type="range"
+              min={-0.55}
+              max={0.55}
+              step={0.01}
+              value={volumeClipY > 2 ? 0.55 : volumeClipY}
+              onChange={(e) => onVolumeClipYChange(Number(e.target.value))}
+            />
+            <button type="button" className="insight-btn secondary" onClick={() => onClearVolumeView && onClearVolumeView()}>
+              Clear volumetric view
+            </button>
+          </div>
+        )}
         {findings.length > 0 ? (
           <div className="findings-list">
             {findings.map((f) => (

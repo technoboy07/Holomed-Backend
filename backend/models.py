@@ -56,7 +56,14 @@ class Case(Document):
         indexes = ["user_id"]
 
 
-ArtifactType = Literal["ct_volume", "mask_volume", "mesh_finding", "mesh_anatomy", "report_json"]
+ArtifactType = Literal[
+    "ct_volume",
+    "mask_volume",
+    "intensity_volume",
+    "mesh_finding",
+    "mesh_anatomy",
+    "report_json",
+]
 
 
 class Artifact(Document):

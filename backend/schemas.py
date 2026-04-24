@@ -4,7 +4,7 @@ Pydantic schemas for request/response validation
 
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -78,8 +78,23 @@ class ArtifactResponse(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    pipeline: str = "nodule_seg_v1"
+    pipeline: Literal["brain_volume_v1", "nodule_seg_v1"] = "brain_volume_v1"
     ct_artifact_id: Optional[str] = None  # if omitted, backend picks latest CT artifact for case
+
+
+class VolumeRenderMetaResponse(BaseModel):
+    """Metadata for volumetric raymarching (see docs/VOLUME_RENDER_CONTRACT.md)."""
+
+    format_version: int
+    nx: int
+    ny: int
+    nz: int
+    spacing_mm: List[float]
+    intensity_file: str
+    tumor_file: str
+    intensity_min: float
+    intensity_max: float
+    notes: Optional[str] = None
 
 
 class AnalysisRunResponse(BaseModel):

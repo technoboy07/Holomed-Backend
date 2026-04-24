@@ -123,8 +123,10 @@ export function useHandTracking(onGestureDetected, options = {}) {
   const stateRef = useRef({
     mode: "idle",
     lastCenter: null,
+    lastPinchDistance: null,
     lastIndexDistance: null,
     smoothedCenter: null,
+    smoothedPinchDistance: null,
     smoothedIndexDistance: null,
     lowQualityFrames: 0,
     recoveryFrames: 0,
@@ -153,8 +155,10 @@ export function useHandTracking(onGestureDetected, options = {}) {
   const resetGestureRefs = () => {
     stateRef.current.mode = "idle";
     stateRef.current.lastCenter = null;
+    stateRef.current.lastPinchDistance = null;
     stateRef.current.lastIndexDistance = null;
     stateRef.current.smoothedCenter = null;
+    stateRef.current.smoothedPinchDistance = null;
     stateRef.current.smoothedIndexDistance = null;
   };
 
@@ -271,7 +275,9 @@ export function useHandTracking(onGestureDetected, options = {}) {
     const pinch = pinchDistance(hand1);
     const center = pinchCenter(hand1);
     const smoothedCenter = smoothPoint(stateRef.current.smoothedCenter, center, cfg.smoothing);
+    const smoothedPinch = smoothValue(stateRef.current.smoothedPinchDistance, pinch, cfg.smoothing);
     stateRef.current.smoothedCenter = smoothedCenter;
+    stateRef.current.smoothedPinchDistance = smoothedPinch;
 
     const pinched = pinch < cfg.pinchThreshold;
     if (pinched) {
@@ -284,8 +290,18 @@ export function useHandTracking(onGestureDetected, options = {}) {
         rotation.pitch = Math.abs(dy) < dead ? 0 : dy;
       }
       stateRef.current.lastCenter = smoothedCenter;
+      // One-hand pinch zoom: opening pinch zooms out/in depending on ratio.
+      if (stateRef.current.lastPinchDistance != null && stateRef.current.lastPinchDistance > 0.001) {
+        const ratio = smoothedPinch / stateRef.current.lastPinchDistance;
+        const adjusted = 1 + (ratio - 1) * (cfg.zoomGain * 0.85);
+        const dead = cfg.deadZone * 1.5;
+        const pinchScale = Math.abs(adjusted - 1.0) < dead ? 1.0 : clamp(adjusted, 0.88, 1.14);
+        scale = pinchScale;
+      }
+      stateRef.current.lastPinchDistance = smoothedPinch;
     } else {
       stateRef.current.lastCenter = null;
+      stateRef.current.lastPinchDistance = null;
     }
 
     if (hands.length >= 2) {
