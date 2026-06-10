@@ -80,8 +80,13 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE
           }
         }
       );
+
+      console.log("Step 1: getting signature");
       
       const sig = await sigResponse.json();
+
+      console.log("Signature:", sig);
+
       
       setProgress(30);
       
@@ -103,7 +108,15 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE
         }
       );
       
+      console.log("Step 2: uploading to cloudinary");
+
+      console.log("Cloudinary status:", cloudinaryResponse.status);
+
       const uploaded = await cloudinaryResponse.json();
+
+      console.log("Cloudinary response:", uploaded);
+
+      console.log("Step 3: saving metadata");
 
       if (!cloudinaryResponse.ok) {
         throw new Error(
@@ -154,6 +167,8 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE
     } finally {
       abortControllerRef.current = null;
     }
+
+    
   };
 
   const handleFileInputChange = (e) => {
