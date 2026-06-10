@@ -83,9 +83,14 @@ async def log_requests(request: Request, call_next):
     )
     return response
 
-# CORS configuration for web/mobile apps
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8081")
-allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # For desktop applications, allow all origins in development
 # Note: Cannot use "*" with allow_credentials=True, so we disable credentials for "*"
