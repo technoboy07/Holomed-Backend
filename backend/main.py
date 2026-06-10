@@ -30,6 +30,8 @@ import time
 import asyncio
 import subprocess
 import sys
+import cloudinary
+import cloudinary.uploader
 
 from database import init_db, close_db
 from models import User, Model3D, Session as SessionModel, Case, Artifact, AnalysisRun, Finding
@@ -48,6 +50,12 @@ from schemas import (
     AnalysisRunResponse,
     FindingResponse,
     VolumeRenderMetaResponse,
+)
+
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
 )
 
 app = FastAPI(
@@ -310,22 +318,23 @@ async def upload_model(file: UploadFile = File(...), name: Optional[str] = Form(
 
     safe_filename = os.path.basename(file.filename)
     model_name = name.strip() if name and name.strip() else os.path.splitext(safe_filename)[0]
-    MAX_FILE_SIZE = 100 * 1024 * 1024
 
     try:
         content = await file.read()
-        if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"File size exceeds maximum of {MAX_FILE_SIZE / 1024 / 1024}MB")
-        file_path = os.path.join(upload_dir, f"{current_user.id}_{datetime.now().timestamp()}_{safe_filename}")
-        with open(file_path, "wb") as buffer:
-            buffer.write(content)
-    except IOError as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to save file: {str(e)}")
+        result = cloudinary.uploader.upload(
+            content,
+            resource_type="raw",
+            folder="holomed-models",
+            public_id=f"{current_user.id}_{datetime.now().timestamp()}_{safe_filename}",
+        )
+        file_path = result["secure_url"]
+        file_size = len(content)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to upload file: {str(e)}")
 
-    new_model = Model3D(user_id=str(current_user.id), name=model_name, file_path=file_path, file_format=file_ext[1:], file_size=len(content))
+    new_model = Model3D(user_id=str(current_user.id), name=model_name, file_path=file_path, file_format=file_ext[1:], file_size=file_size)
     await new_model.insert()
     return ModelResponse(id=str(new_model.id), name=new_model.name, file_path=new_model.file_path, file_format=new_model.file_format, file_size=new_model.file_size, created_at=new_model.created_at)
-
 
 @app.get("/api/models", response_model=List[ModelResponse])
 async def list_models(current_user: User = Depends(get_current_user), db=Depends(get_db)):
