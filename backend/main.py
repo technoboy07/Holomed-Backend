@@ -125,25 +125,19 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Static file serving for uploaded models
-upload_dir = "uploads"
+upload_dir = "/tmp/uploads"
 os.makedirs(upload_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
-# CT workflow storage (Phase 1)
 ct_upload_dir = os.path.join(upload_dir, "ct")
 os.makedirs(ct_upload_dir, exist_ok=True)
 
 derived_upload_dir = os.path.join(upload_dir, "derived")
 os.makedirs(derived_upload_dir, exist_ok=True)
 
-# Simple static mount for local holomed-ai outputs (brain.glb / tumor.glb).
-ai_output_dir = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "holomed-ai", "output")
-)
+ai_output_dir = "/tmp/ai-output"
 os.makedirs(ai_output_dir, exist_ok=True)
 app.mount("/ai-output", StaticFiles(directory=ai_output_dir), name="ai-output")
-
 
 async def _process_analysis_run(run_id: str):
     """Best-effort async background processing for a single analysis run.
