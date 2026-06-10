@@ -5,7 +5,10 @@ import Viewer from "./components/Viewer";
 import InfoPanel from "./components/InfoPanel";
 import LoginModal from "./components/LoginModal";
 import ToastContainer from "./components/ToastContainer";
+import BrainScreen from "./components/BrainScreen";
+import CutawayViewer from "./components/CutawayViewer";
 import { apiRequest, isUnauthorizedError } from "./utils/api";
+import { TUMOR_DISPLAY } from "./utils/tumorOverlay";
 import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
@@ -52,6 +55,9 @@ function App() {
   const [volumeLoading, setVolumeLoading] = useState(false);
   const [volumeClipY, setVolumeClipY] = useState(10);
   const [analysisPolling, setAnalysisPolling] = useState(false);
+  const [brainScreenOpen, setBrainScreenOpen] = useState(false);
+  const [cutawayEnabled, setCutawayEnabled] = useState(false);
+  const [tumorDisplayMode, setTumorDisplayMode] = useState(TUMOR_DISPLAY.BOTH);
 
   const clearSelectedModelUrl = useCallback(() => {
     setSelectedModelUrl((prevUrl) => {
@@ -322,6 +328,15 @@ function App() {
 
   const modelUrl = selectedModelUrl || null;
   const modelFormat = selectedModel?.file_format || "stl";
+  const tumorOverlayUrl =
+    overlayMeshes?.find((m) => m?.url && m.visible !== false)?.url || null;
+  const canShowCutaway =
+    displayMode === "mesh" &&
+    cutawayEnabled &&
+    modelUrl &&
+    (modelFormat?.toLowerCase() === "glb" ||
+      modelFormat?.toLowerCase() === "gltf") &&
+    tumorOverlayUrl;
 
   const loadFindingsAndMeshes = useCallback(async () => {
     if (!token) {
@@ -486,6 +501,7 @@ function App() {
       setVolumeRenderData(null);
       setVolumeClipY(10);
       setDisplayMode("mesh");
+      setCutawayEnabled(false);
 
       const [brainRes, tumorRes] = await Promise.all([
         fetch(`${AI_OUTPUT_BASE}/brain.glb`),
@@ -580,6 +596,13 @@ function App() {
 
   return (
     <div className="app-container">
+      {brainScreenOpen && (
+        <BrainScreen
+          apiRoot={API_ROOT}
+          onClose={() => setBrainScreenOpen(false)}
+          tumorDisplayMode={tumorDisplayMode}
+        />
+      )}
       <Header 
         user={user} 
         onLogout={handleLogout}
@@ -620,15 +643,23 @@ function App() {
             </div>
           )}
           {volumeRenderData || modelUrl ? (
-            <Viewer 
-              transform={data.transform} 
-              modelPath={displayMode === "volume" && volumeRenderData ? null : modelUrl}
-              modelFormat={modelFormat}
-              enableHandTracking={true}
-              findingMeshes={overlayMeshes}
-              volumeData={displayMode === "volume" ? volumeRenderData : null}
-              volumeClipY={volumeClipY}
-            />
+            canShowCutaway ? (
+              <CutawayViewer
+                brainUrl={modelUrl}
+                tumorUrl={tumorOverlayUrl}
+              />
+            ) : (
+              <Viewer 
+                transform={data.transform} 
+                modelPath={displayMode === "volume" && volumeRenderData ? null : modelUrl}
+                modelFormat={modelFormat}
+                enableHandTracking={true}
+                findingMeshes={overlayMeshes}
+                tumorDisplayMode={tumorDisplayMode}
+                volumeData={displayMode === "volume" ? volumeRenderData : null}
+                volumeClipY={volumeClipY}
+              />
+            )
           ) : selectedModel && modelFileError ? (
             <div style={{
               display: 'flex',
@@ -681,6 +712,11 @@ function App() {
             displayMode={displayMode}
             onChangeDisplayMode={setDisplayMode}
             onLoadSimpleAiOutputs={loadSimpleAiOutputs}
+            onOpenBrainScreen={() => setBrainScreenOpen(true)}
+            cutawayEnabled={cutawayEnabled}
+            onToggleCutaway={() => setCutawayEnabled((prev) => !prev)}
+            tumorDisplayMode={tumorDisplayMode}
+            onTumorDisplayModeChange={setTumorDisplayMode}
             onVolumeClipYChange={setVolumeClipY}
             onClearVolumeView={() => {
               setVolumeRenderData(null);

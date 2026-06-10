@@ -1,4 +1,0 @@
-opencv-python
-mediapipe==0.10.13
-pyvista
-numpy

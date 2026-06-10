@@ -6,9 +6,11 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader";
 import { VTKLoader } from "three/examples/jsm/loaders/VTKLoader";
-import { Stage, Center, OrbitControls, Line, Html } from "@react-three/drei";
+import { Stage, Center, OrbitControls, Line, Html, useProgress } from "@react-three/drei";
 import { useHandTracking } from "../hooks/useHandTracking";
 import { VolumeRaycastMesh } from "./VolumeRaycast";
+import TumorLocationMarkers from "./TumorLocationMarkers";
+import { isTumorOverlayMesh, TUMOR_DISPLAY } from "../utils/tumorOverlay";
 
 const AI_OVERLAY_ZOOM_THRESHOLD = 1.25;
 
@@ -172,7 +174,9 @@ function Model({ transform, modelPath, modelFormat, interactionMode, onSurfacePi
       if (format === 'gltf' || format === 'glb') {
         // GLTFLoader returns a full scene graph; render it directly.
         if (modelData?.scene) {
-          return { geometry: null, object: modelData.scene.clone(true) };
+          // Avoid deep-cloning large GLBs (can be extremely expensive).
+          // We treat the loaded scene as immutable and only apply transforms on a parent <group>.
+          return { geometry: null, object: modelData.scene };
         }
         return { geometry: null, object: null };
       } else if (format === 'obj') {
@@ -216,7 +220,7 @@ function Model({ transform, modelPath, modelFormat, interactionMode, onSurfacePi
           onSurfacePick(event.point);
         }}
       >
-        <primitive object={renderData.object} />
+        <primitive object={renderData.object} dispose={null} />
       </group>
     );
   }
@@ -243,6 +247,8 @@ export default function Viewer({
   enableHandTracking = false,
   modelFormat = "stl",
   findingMeshes = [],
+  /** 'glb' | 'spheres' | 'both' — how to show AI tumor overlay */
+  tumorDisplayMode = TUMOR_DISPLAY.BOTH,
   volumeData = null,
   volumeClipY = 10,
 }) {
@@ -256,12 +262,27 @@ export default function Viewer({
   const [toolsHost, setToolsHost] = useState(null);
   const aiOverlayVisible = transform.scale >= AI_OVERLAY_ZOOM_THRESHOLD;
   const hasFindingOverlays = Array.isArray(findingMeshes) && findingMeshes.some((m) => m?.url);
+  const showTumorGlb = tumorDisplayMode === TUMOR_DISPLAY.GLB || tumorDisplayMode === TUMOR_DISPLAY.BOTH;
+  const showTumorSpheres = tumorDisplayMode === TUMOR_DISPLAY.SPHERES || tumorDisplayMode === TUMOR_DISPLAY.BOTH;
+  const tumorGlbOverlays = Array.isArray(findingMeshes)
+    ? findingMeshes.filter((m) => m?.visible && m?.url && isTumorOverlayMesh(m))
+    : [];
+  const nonTumorOverlays = Array.isArray(findingMeshes)
+    ? findingMeshes.filter((m) => m?.visible && m?.url && !isTumorOverlayMesh(m))
+    : [];
+  const showZoomForGlbTumor =
+    tumorGlbOverlays.length > 0 && showTumorGlb && !aiOverlayVisible;
+  const showZoomForOtherGlb = nonTumorOverlays.length > 0 && !aiOverlayVisible;
+  const showGlbZoomHint = showZoomForGlbTumor || showZoomForOtherGlb;
 
+  // rotation deltas are produced like Basic_fucntionality_files/mesh_model.py (ROTATION_GAIN * center delta);
+  // scale is per-frame multiplicative ratio for two index fingers, same as mesh_model.
+  const GESTURE_ROT_DEG_PER_UNIT = 0.5;
   const handleGesture = useCallback((gestureData) => {
     if (handTrackingEnabled) {
       setTransform(prev => ({
-        pitch: prev.pitch + gestureData.rotation.pitch * 0.008,
-        yaw: prev.yaw + gestureData.rotation.yaw * 0.008,
+        pitch: prev.pitch + gestureData.rotation.pitch * GESTURE_ROT_DEG_PER_UNIT,
+        yaw: prev.yaw + gestureData.rotation.yaw * GESTURE_ROT_DEG_PER_UNIT,
         scale: Math.max(0.2, Math.min(5.0, prev.scale * gestureData.scale))
       }));
     }
@@ -658,6 +679,8 @@ export default function Viewer({
       </div>
   );
 
+  const loaderFallback = <ModelLoadingOverlay />;
+
   return (
     <div className="viewer-area" style={{ position: 'relative' }}>
       {toolsHost && createPortal(clinicalToolsPanel, toolsHost)}
@@ -704,7 +727,7 @@ export default function Viewer({
         </div>
       )}
 
-      {hasFindingOverlays && !aiOverlayVisible && (
+      {hasFindingOverlays && !aiOverlayVisible && showGlbZoomHint && (
         <div
           style={{
             position: "absolute",
@@ -730,12 +753,7 @@ export default function Viewer({
 
         {volumeData ? (
           <Suspense
-            fallback={
-              <mesh>
-                <boxGeometry args={[2, 2, 2]} />
-                <meshStandardMaterial color="#778da9" />
-              </mesh>
-            }
+            fallback={loaderFallback}
           >
             <Stage environment="city" intensity={0.55}>
               <Center>
@@ -765,12 +783,7 @@ export default function Viewer({
             </Stage>
           </Suspense>
         ) : modelPath ? (
-          <Suspense fallback={
-            <mesh>
-              <boxGeometry args={[2, 2, 2]} />
-              <meshStandardMaterial color="#888888" />
-            </mesh>
-          }>
+          <Suspense fallback={loaderFallback}>
             <Stage environment="city" intensity={0.6}>
               <Center>
                 <Model 
@@ -782,10 +795,19 @@ export default function Viewer({
                 />
                 <MeasurementOverlay measurements={measurements} pendingPoint={pendingPoint} />
                 <AnnotationOverlay annotations={annotations} />
-                {Array.isArray(findingMeshes) && findingMeshes
-                  .filter((m) => m.visible && m.url)
-                  .map((m) => (
+                {nonTumorOverlays.map((m) => (
+                  <FindingMesh key={m.id} meshUrl={m.url} visible={aiOverlayVisible} />
+                ))}
+                {showTumorGlb &&
+                  tumorGlbOverlays.map((m) => (
                     <FindingMesh key={m.id} meshUrl={m.url} visible={aiOverlayVisible} />
+                  ))}
+                {showTumorSpheres &&
+                  tumorGlbOverlays.map((m) => (
+                    <TumorLocationMarkers
+                      key={`${m.id}-tumor-balls`}
+                      tumorGlbUrl={m.url}
+                    />
                   ))}
               </Center>
             </Stage>
@@ -800,5 +822,31 @@ export default function Viewer({
         {!handTrackingEnabled && <OrbitControls enabled={interactionMode === "navigate"} />}
       </Canvas>
     </div>
+  );
+}
+
+function ModelLoadingOverlay() {
+  const { active, progress, item } = useProgress();
+  if (!active) return null;
+  return (
+    <Html center>
+      <div style={{
+        background: "rgba(10, 18, 30, 0.88)",
+        border: "1px solid #415a77",
+        borderRadius: 8,
+        padding: "10px 12px",
+        color: "#e0e1dd",
+        minWidth: 240,
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Loading model…</div>
+        <div style={{ fontSize: 11, color: "#8da4bb", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {item || "Preparing assets"}
+        </div>
+        <div style={{ height: 8, background: "rgba(65,90,119,0.35)", borderRadius: 999, overflow: "hidden" }}>
+          <div style={{ width: `${Math.max(2, Math.min(100, progress))}%`, height: "100%", background: "#00b4d8" }} />
+        </div>
+        <div style={{ fontSize: 11, color: "#8da4bb", marginTop: 6 }}>{Math.round(progress)}%</div>
+      </div>
+    </Html>
   );
 }

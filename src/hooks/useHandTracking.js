@@ -8,15 +8,17 @@ import { Camera } from "@mediapipe/camera_utils";
 const UI_UPDATE_INTERVAL_MS = 320;
 const CALIBRATION_FRAMES = 72;
 
+// zoomGain: reserved for any future per-frame scaling gain; two-index zoom uses direct ratio
+// (see Basic_fucntionality_files/mesh_model.py: scale_mult = hand_dist / last_dist).
 const PRESETS = {
   demo: {
     rotationGain: 120,
-    zoomGain: 1.35,
+    zoomGain: 1.5,
     deadZone: 0.007,
     minConfidence: 0.58,
     frameStride: 1,
     smoothing: 0.28,
-    pinchThreshold: 0.055,
+    pinchThreshold: 0.05,
   },
   precision: {
     rotationGain: 85,
@@ -25,20 +27,20 @@ const PRESETS = {
     minConfidence: 0.68,
     frameStride: 1,
     smoothing: 0.36,
-    pinchThreshold: 0.052,
+    pinchThreshold: 0.05,
   },
   fast: {
     rotationGain: 145,
-    zoomGain: 1.55,
+    zoomGain: 1.5,
     deadZone: 0.005,
     minConfidence: 0.54,
     frameStride: 2,
     smoothing: 0.22,
-    pinchThreshold: 0.058,
+    pinchThreshold: 0.05,
   },
   clinical: {
     rotationGain: 75,
-    zoomGain: 1.12,
+    zoomGain: 1.2,
     deadZone: 0.014,
     minConfidence: 0.74,
     frameStride: 1,
@@ -123,7 +125,6 @@ export function useHandTracking(onGestureDetected, options = {}) {
   const stateRef = useRef({
     mode: "idle",
     lastCenter: null,
-    lastPinchDistance: null,
     lastIndexDistance: null,
     smoothedCenter: null,
     smoothedPinchDistance: null,
@@ -155,7 +156,6 @@ export function useHandTracking(onGestureDetected, options = {}) {
   const resetGestureRefs = () => {
     stateRef.current.mode = "idle";
     stateRef.current.lastCenter = null;
-    stateRef.current.lastPinchDistance = null;
     stateRef.current.lastIndexDistance = null;
     stateRef.current.smoothedCenter = null;
     stateRef.current.smoothedPinchDistance = null;
@@ -265,12 +265,12 @@ export function useHandTracking(onGestureDetected, options = {}) {
     //   return;
     // }
 
+    // Reference: Basic_fucntionality_files/mesh_model.py HandTracker.run
+    // - One hand, pinch (thumb 4 + index 8) below threshold: move pinch center to rotate (pitch/yaw only).
+    // - Two hands: distance between both index tips (8 and 8) — ratio vs previous frame = zoom; no one-hand pinch zoom.
     let rotation = { pitch: 0, yaw: 0, roll: 0 };
     let scale = 1.0;
 
-    // Match desktop reference behavior:
-    // 1) Always evaluate one-hand pinch-rotate using first detected hand.
-    // 2) If a second hand exists, additionally evaluate two-index-finger zoom.
     const hand1 = hands[0];
     const pinch = pinchDistance(hand1);
     const center = pinchCenter(hand1);
@@ -290,32 +290,22 @@ export function useHandTracking(onGestureDetected, options = {}) {
         rotation.pitch = Math.abs(dy) < dead ? 0 : dy;
       }
       stateRef.current.lastCenter = smoothedCenter;
-      // One-hand pinch zoom: opening pinch zooms out/in depending on ratio.
-      if (stateRef.current.lastPinchDistance != null && stateRef.current.lastPinchDistance > 0.001) {
-        const ratio = smoothedPinch / stateRef.current.lastPinchDistance;
-        const adjusted = 1 + (ratio - 1) * (cfg.zoomGain * 0.85);
-        const dead = cfg.deadZone * 1.5;
-        const pinchScale = Math.abs(adjusted - 1.0) < dead ? 1.0 : clamp(adjusted, 0.88, 1.14);
-        scale = pinchScale;
-      }
-      stateRef.current.lastPinchDistance = smoothedPinch;
     } else {
       stateRef.current.lastCenter = null;
-      stateRef.current.lastPinchDistance = null;
     }
+    // Do not use pinch open/close for zoom (that was not in the original).
 
     if (hands.length >= 2) {
       const hand2 = hands[1];
       const indexDistance = distance2D(hand1[8], hand2[8]);
       const smoothedDist = smoothValue(stateRef.current.smoothedIndexDistance, indexDistance, cfg.smoothing);
       stateRef.current.smoothedIndexDistance = smoothedDist;
-      stateRef.current.mode = pinched ? "rotate+zoom" : "zoom";
+      stateRef.current.mode = pinched ? "rotate+two_index_zoom" : "two_index_zoom";
 
       if (stateRef.current.lastIndexDistance != null && stateRef.current.lastIndexDistance > 0.01) {
         const ratio = smoothedDist / stateRef.current.lastIndexDistance;
-        const adjusted = 1 + (ratio - 1) * cfg.zoomGain;
-        const dead = cfg.deadZone * 1.8;
-        scale = Math.abs(adjusted - 1.0) < dead ? 1.0 : clamp(adjusted, 0.86, 1.18);
+        const dead = cfg.deadZone * 1.5;
+        scale = Math.abs(ratio - 1.0) < dead ? 1.0 : clamp(ratio, 0.88, 1.12);
       }
       stateRef.current.lastIndexDistance = smoothedDist;
     } else {

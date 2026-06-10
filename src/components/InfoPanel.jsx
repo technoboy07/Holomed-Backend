@@ -15,6 +15,11 @@ export default function InfoPanel({
   analysisPolling = false,
   onLoadVolumeRender,
   onLoadSimpleAiOutputs,
+  onOpenBrainScreen,
+  cutawayEnabled = false,
+  onToggleCutaway,
+  tumorDisplayMode = "both",
+  onTumorDisplayModeChange,
   volumeLoading = false,
   volumeActive = false,
   volumeClipY = 10,
@@ -100,6 +105,32 @@ export default function InfoPanel({
             </button>
           </div>
         </div>
+        <div className="insight-row" style={{ alignItems: "flex-start", flexDirection: "column", gap: 6, marginTop: 4 }}>
+          <span>Tumor view (AI overlay)</span>
+          <select
+            value={tumorDisplayMode}
+            onChange={(e) => onTumorDisplayModeChange && onTumorDisplayModeChange(e.target.value)}
+            disabled={displayMode !== "mesh" || !onTumorDisplayModeChange}
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              padding: "6px 8px",
+              borderRadius: 6,
+              background: displayMode === "mesh" ? "#0d1b2a" : "#0d1b2a",
+              color: "#e0e1dd",
+              border: "1px solid #415a77",
+              fontSize: 12,
+            }}
+            title={displayMode !== "mesh" ? "Switch to Mesh Overlay to change tumor view" : ""}
+          >
+            <option value="both">CT mesh (GLB) + yellow marker</option>
+            <option value="spheres">Yellow marker only (clearer in demos)</option>
+            <option value="glb">CT mesh (GLB) only</option>
+          </select>
+          <p style={{ margin: 0, fontSize: 10, color: "#778da9", lineHeight: 1.35 }}>
+            A tiny neon marker is placed from the tumor GLB bounds. Cutaway view always shows GLB + marker. Use “Annotate” for custom pins.
+          </p>
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
           <button
             type="button"
@@ -107,6 +138,23 @@ export default function InfoPanel({
             onClick={() => onLoadSimpleAiOutputs && onLoadSimpleAiOutputs()}
           >
             Load AI Output Files (brain.glb + tumor.glb)
+          </button>
+          <button
+            type="button"
+            className="insight-btn secondary"
+            onClick={() => onToggleCutaway && onToggleCutaway()}
+            style={{ opacity: displayMode === "mesh" ? 1 : 0.55 }}
+            disabled={displayMode !== "mesh"}
+            title={displayMode !== "mesh" ? "Switch to Mesh Overlay mode first" : ""}
+          >
+            {cutawayEnabled ? "Disable cutaway (main viewer)" : "Enable cutaway (main viewer)"}
+          </button>
+          <button
+            type="button"
+            className="insight-btn secondary"
+            onClick={() => onOpenBrainScreen && onOpenBrainScreen()}
+          >
+            Open brain.glb in new screen
           </button>
           <p style={{ margin: 0, fontSize: 11, color: "#778da9", lineHeight: 1.4 }}>
             This loads files directly from <strong>holomed-ai/output</strong> with no case ID or run ID.
