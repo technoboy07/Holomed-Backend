@@ -127,7 +127,7 @@ manager = ConnectionManager()
 
 upload_dir = "/tmp/uploads"
 os.makedirs(upload_dir, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
+app.mount("/uploads", StaticFiles(directory=upload_dir), name="/tmp/uploads")
 
 ct_upload_dir = os.path.join(upload_dir, "ct")
 os.makedirs(ct_upload_dir, exist_ok=True)
