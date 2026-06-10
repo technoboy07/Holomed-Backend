@@ -73,7 +73,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE
 
       // Step 1 - Get Cloudinary signature
       const sigResponse = await fetch(
-        `${API_BASE}/upload-signature`,
+        `${API_BASE}/api/upload-signature`,
         {
           headers: {
             Authorization: `Bearer ${token}`
