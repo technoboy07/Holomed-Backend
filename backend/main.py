@@ -32,6 +32,8 @@ import subprocess
 import sys
 import cloudinary
 import cloudinary.uploader
+import time
+import cloudinary.utils
 
 from database import init_db, close_db
 from models import User, Model3D, Session as SessionModel, Case, Artifact, AnalysisRun, Finding
@@ -51,6 +53,13 @@ from schemas import (
     FindingResponse,
     VolumeRenderMetaResponse,
 )
+from pydantic import BaseModel
+
+class ModelUploadMetadata(BaseModel):
+    name: str
+    file_path: str
+    file_format: str
+    file_size: int
 
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -92,14 +101,8 @@ async def log_requests(request: Request, call_next):
 
 security = HTTPBearer()
 
-# Lazy DB initialization
-_db_initialized = False
-
 async def get_db():
-    global _db_initialized
-    if not _db_initialized:
-        await init_db()
-        _db_initialized = True
+    return True
 
 # Static file serving
 upload_dir = "/tmp/uploads"
@@ -314,9 +317,28 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
 async def get_current_user_info(current_user: User = Depends(get_current_user), db=Depends(get_db)):
     return UserResponse(id=str(current_user.id), email=current_user.email, subscription_tier=current_user.subscription_tier, created_at=current_user.created_at)
 
+@app.get("/api/upload-signature")
+async def get_upload_signature():
+    timestamp = int(time.time())
 
-@app.post("/api/models/upload", response_model=ModelResponse, status_code=status.HTTP_201_CREATED)
-async def upload_model(file: UploadFile = File(...), name: Optional[str] = Form(None), current_user: User = Depends(get_current_user), db=Depends(get_db)):
+    signature = cloudinary.utils.api_sign_request(
+        {
+            "timestamp": timestamp,
+            "folder": "holomed-models"
+        },
+        cloudinary.config().api_secret
+    )
+
+    return {
+        "timestamp": timestamp,
+        "signature": signature,
+        "cloud_name": cloudinary.config().cloud_name,
+        "api_key": cloudinary.config().api_key,
+        "folder": "holomed-models"
+    }
+
+# @app.post("/api/models/upload", response_model=ModelResponse, status_code=status.HTTP_201_CREATED)
+# async def upload_model(file: UploadFile = File(...), name: Optional[str] = Form(None), current_user: User = Depends(get_current_user), db=Depends(get_db)):
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required")
 
@@ -344,6 +366,31 @@ async def upload_model(file: UploadFile = File(...), name: Optional[str] = Form(
     new_model = Model3D(user_id=str(current_user.id), name=model_name, file_path=file_path, file_format=file_ext[1:], file_size=file_size)
     await new_model.insert()
     return ModelResponse(id=str(new_model.id), name=new_model.name, file_path=new_model.file_path, file_format=new_model.file_format, file_size=new_model.file_size, created_at=new_model.created_at)
+
+@app.post("/api/models", response_model=ModelResponse)
+async def create_model(
+    model_data: ModelUploadMetadata,
+    current_user: User = Depends(get_current_user)
+):
+
+    new_model = Model3D(
+        user_id=str(current_user.id),
+        name=model_data.name,
+        file_path=model_data.file_path,
+        file_format=model_data.file_format,
+        file_size=model_data.file_size
+    )
+
+    await new_model.insert()
+
+    return ModelResponse(
+        id=str(new_model.id),
+        name=new_model.name,
+        file_path=new_model.file_path,
+        file_format=new_model.file_format,
+        file_size=new_model.file_size,
+        created_at=new_model.created_at
+    )
 
 @app.get("/api/models", response_model=List[ModelResponse])
 async def list_models(current_user: User = Depends(get_current_user), db=Depends(get_db)):

@@ -69,17 +69,70 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE
 
     try {
       setProgress(20);
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('name', modelName.trim());
-
       abortControllerRef.current = new AbortController();
-      const responseData = await apiRequest(API_BASE, "/models/upload", {
-        method: "POST",
-        token,
-        body: formData,
-        signal: abortControllerRef.current.signal,
-      });
+
+      // Step 1 - Get Cloudinary signature
+      const sigResponse = await fetch(
+        `${API_BASE}/api/upload-signature`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      
+      const sig = await sigResponse.json();
+      
+      setProgress(30);
+      
+      // Step 2 - Upload directly to Cloudinary
+      const cloudinaryForm = new FormData();
+      
+      cloudinaryForm.append("file", selectedFile);
+      cloudinaryForm.append("api_key", sig.api_key);
+      cloudinaryForm.append("timestamp", sig.timestamp);
+      cloudinaryForm.append("signature", sig.signature);
+      cloudinaryForm.append("folder", sig.folder);
+      
+      const cloudinaryResponse = await fetch(
+        `https://api.cloudinary.com/v1_1/${sig.cloud_name}/raw/upload`,
+        {
+          method: "POST",
+          body: cloudinaryForm,
+          signal: abortControllerRef.current.signal
+        }
+      );
+      
+      const uploaded = await cloudinaryResponse.json();
+
+      if (!cloudinaryResponse.ok) {
+        throw new Error(
+          uploaded.error?.message || "Cloudinary upload failed"
+        );
+      }
+      
+      setProgress(80);
+      
+      // Step 3 - Save metadata to MongoDB
+      const responseData = await apiRequest(
+        API_BASE,
+        "/models",
+        {
+          method: "POST",
+          token,
+          body: JSON.stringify({
+            name: modelName.trim(),
+            file_path: uploaded.secure_url,
+            file_format: selectedFile.name.split('.').pop(),
+            file_size: uploaded.bytes
+          }),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      
+      setProgress(100);
 
       setProgress(90);
       setProgress(100);
