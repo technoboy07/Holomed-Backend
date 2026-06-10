@@ -92,6 +92,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/debug-db")
+async def debug_db():
+    try:
+        from database import client
+        result = await client.admin.command('ping')
+        return {"db_connected": True, "ping": str(result)}
+    except Exception as e:
+        return {"db_connected": False, "error": str(e)}
+
 security = HTTPBearer()
 
 # WebSocket connection manager for hand tracking
