@@ -34,3 +34,5 @@ backend/ml_bundles/
 # Python virtualenvs
 .venv/
 venv/
+
+echo "backend/holomend/" >> .gitignore
