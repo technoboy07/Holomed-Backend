@@ -129,7 +129,7 @@ export default function UploadModal({ isOpen, onClose, onUploadSuccess, API_BASE
       // Step 3 - Save metadata to MongoDB
       const responseData = await apiRequest(
         API_BASE,
-        "/models",
+        "/api/models",
         {
           method: "POST",
           token,
