@@ -58,10 +58,19 @@ cloudinary.config(
     api_secret=os.getenv("CLOUDINARY_API_SECRET"),
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Initializing database...")
+    await init_db()
+    print("Database initialized")
+    yield
+    await close_db()
+
 app = FastAPI(
     title="HoloMed API",
     description="Backend API for HoloMed - Holographic Medical Visualization",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration
