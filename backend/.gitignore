@@ -1,1 +1,7 @@
-echo "backend/holomend/" >> .gitignore
+holomend/
+venv/
+ml_bundles/
+uploads/
+__pycache__/
+*.pyc
+.env
