@@ -317,7 +317,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get
 async def get_current_user_info(current_user: User = Depends(get_current_user), db=Depends(get_db)):
     return UserResponse(id=str(current_user.id), email=current_user.email, subscription_tier=current_user.subscription_tier, created_at=current_user.created_at)
 
-@app.get("/upload-signature")
+@app.get("/api/upload-signature")
 async def get_upload_signature():
     timestamp = int(time.time())
 
