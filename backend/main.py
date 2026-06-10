@@ -92,25 +92,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# For desktop applications, allow all origins in development
-# Note: Cannot use "*" with allow_credentials=True, so we disable credentials for "*"
-if os.getenv("ENVIRONMENT") != "production":
-    # Allow all origins but disable credentials (desktop apps don't need cookies)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,  # Must be False when using "*"
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-else:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 security = HTTPBearer()
 
 # WebSocket connection manager for hand tracking
