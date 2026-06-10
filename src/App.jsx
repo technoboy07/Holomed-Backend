@@ -11,7 +11,7 @@ import { apiRequest, isUnauthorizedError } from "./utils/api";
 import { TUMOR_DISPLAY } from "./utils/tumorOverlay";
 import "./App.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
+const API_BASE = "https://holomed-backend.onrender.com";
 const API_ROOT = API_BASE.replace(/\/api\/?$/, "");
 const AI_OUTPUT_BASE = `${API_ROOT}/ai-output`;
 
