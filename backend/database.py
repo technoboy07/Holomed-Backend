@@ -47,3 +47,25 @@ async def close_db():
 def get_database():
     """Get database instance"""
     return client[DATABASE_NAME]
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await init_db()
+    except Exception as e:
+        print(f"STARTUP ERROR: {e}")
+        # Don't re-raise — lets the server start so /health works
+    yield
+    try:
+        await close_db()
+    except Exception:
+        pass
+
+@app.get("/health")
+async def health():
+    mongo_url_set = os.getenv("MONGODB_URL", "").startswith("mongodb")
+    return {
+        "status": "ok",
+        "mongodb_url_set": mongo_url_set,
+        "environment": os.getenv("ENVIRONMENT", "not set")
+    }

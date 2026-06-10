@@ -53,11 +53,15 @@ from schemas import (
 # Lifespan events for database connection
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize database
-    await init_db()
+    try:
+        await init_db()
+    except Exception as e:
+        print(f"STARTUP ERROR: {e}")
     yield
-    # Shutdown: Close database
-    await close_db()
+    try:
+        await close_db()
+    except Exception:
+        pass
 
 app = FastAPI(
     title="HoloMed API",
@@ -310,7 +314,12 @@ async def _process_analysis_run(run_id: str):
 # Health check endpoint
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "service": "HoloMed API"}
+    mongo_url_set = os.getenv("MONGODB_URL", "").startswith("mongodb")
+    return {
+        "status": "ok",
+        "mongodb_url_set": mongo_url_set,
+        "environment": os.getenv("ENVIRONMENT", "not set")
+    }
 
 MAX_PASSWORD_LEN = 72  # bcrypt limit
 
