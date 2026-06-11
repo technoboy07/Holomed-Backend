@@ -115,7 +115,7 @@ function App() {
 
     setLoadingModels(true);
     try {
-      const modelData = await apiRequest(API_BASE, "/models", {
+      const modelData = await apiRequest(API_BASE, "/api/models", {
         token,
       });
       setServiceHealth("api", "up");
@@ -249,7 +249,7 @@ function App() {
     setModelFileError(null);
 
     try {
-      const blob = await apiRequest(API_BASE, `/models/${model.id}/file`, {
+      const blob = await apiRequest(API_BASE, `/api/models/${model.id}/file`, {
         token,
         responseType: "blob",
       });
@@ -300,7 +300,7 @@ function App() {
     if (!shouldDelete) return;
 
     try {
-      await apiRequest(API_BASE, `/models/${model.id}`, {
+      await apiRequest(API_BASE, `/api/models/${model.id}`, {
         method: "DELETE",
         token,
         responseType: "none",
