@@ -397,34 +397,33 @@ async def list_models(current_user: User = Depends(get_current_user), db=Depends
     models = await Model3D.find(Model3D.user_id == str(current_user.id)).to_list()
     return [ModelResponse(id=str(m.id), name=m.name, file_path=m.file_path, file_format=m.file_format, file_size=m.file_size, created_at=m.created_at) for m in models]
 
-
-@app.get("/api/models/{model_id}", response_model=ModelResponse)
-async def get_model(model_id: str, current_user: User = Depends(get_current_user), db=Depends(get_db)):
-    try:
-        model_obj_id = ObjectId(model_id)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid model ID format")
-
-    model = await Model3D.find_one(Model3D.id == model_obj_id, Model3D.user_id == str(current_user.id))
-    if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
-    return ModelResponse(id=str(model.id), name=model.name, file_path=model.file_path, file_format=model.file_format, file_size=model.file_size, created_at=model.created_at)
-
+from fastapi.responses import RedirectResponse
 
 @app.get("/api/models/{model_id}/file")
-async def get_model_file(model_id: str, current_user: User = Depends(get_current_user), db=Depends(get_db)):
+async def get_model_file(
+    model_id: str,
+    current_user: User = Depends(get_current_user)
+):
     try:
         model_obj_id = ObjectId(model_id)
     except (ValueError, TypeError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid model ID format")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid model ID format"
+        )
 
-    model = await Model3D.find_one(Model3D.id == model_obj_id, Model3D.user_id == str(current_user.id))
+    model = await Model3D.find_one(
+        Model3D.id == model_obj_id,
+        Model3D.user_id == str(current_user.id)
+    )
+
     if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
-    if not os.path.exists(model.file_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model file not found on server")
-    return FileResponse(model.file_path, media_type="application/octet-stream", filename=model.name)
+        raise HTTPException(
+            status_code=404,
+            detail="Model not found"
+        )
 
+    return RedirectResponse(model.file_path)
 
 @app.delete("/api/models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_model(model_id: str, current_user: User = Depends(get_current_user), db=Depends(get_db)):

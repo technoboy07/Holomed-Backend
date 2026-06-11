@@ -249,16 +249,11 @@ function App() {
     setModelFileError(null);
 
     try {
-      const blob = await apiRequest(API_BASE, `/api/models/${model.id}/file`, {
-        token,
-        responseType: "blob",
-      });
       setServiceHealth("api", "up");
       setServiceHealth("model", "up");
-      const blobUrl = URL.createObjectURL(blob);
-      setSelectedModelUrl(blobUrl);
-      setError(null);
-    } catch (fileError) {
+    
+      setSelectedModelUrl(model.file_path);
+  } catch (fileError) {
       if (isUnauthorizedError(fileError)) {
         setServiceHealth("api", "up");
         handleAuthFailure();
