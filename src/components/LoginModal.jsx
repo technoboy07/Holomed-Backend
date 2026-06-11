@@ -20,14 +20,14 @@ export default function LoginModal({ onLogin, onClose, API_BASE, onToast }) {
         const formData = new FormData();
         formData.append('username', email); // FastAPI OAuth2 uses 'username' field
         formData.append('password', password);
-        const data = await apiRequest(API_BASE, "/auth/login", {
+        const data = await apiRequest(API_BASE, "/api/auth/login", {
           method: "POST",
           body: formData,
         });
         onLogin(data.access_token, data.user);
       } else {
         // Register
-        await apiRequest(API_BASE, "/auth/register", {
+        await apiRequest(API_BASE, "/api/auth/register", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -43,7 +43,7 @@ export default function LoginModal({ onLogin, onClose, API_BASE, onToast }) {
         const loginFormData = new FormData();
         loginFormData.append('username', email);
         loginFormData.append('password', password);
-        const loginData = await apiRequest(API_BASE, "/auth/login", {
+        const loginData = await apiRequest(API_BASE, "/api/auth/login", {
           method: "POST",
           body: loginFormData,
         });
