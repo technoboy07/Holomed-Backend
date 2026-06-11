@@ -47,5 +47,3 @@ async def close_db():
 def get_database():
     """Get database instance"""
     return client[DATABASE_NAME]
-
-

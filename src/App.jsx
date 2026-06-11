@@ -168,7 +168,7 @@ function App() {
 
   const checkApiHealth = useCallback(async () => {
     try {
-      const response = await fetch(`${API_ROOT}/health`);
+      const response = await fetch(`${API_ROOT}/api/health`);
       setServiceHealth("api", response.ok ? "up" : "down");
     } catch {
       setServiceHealth("api", "down");

@@ -254,7 +254,7 @@ async def _process_analysis_run(run_id: str):
 
 
 # Health check
-@app.get("/health")
+@app.get("/api/health")
 async def health():
     mongo_url_set = os.getenv("MONGODB_URL", "").startswith("mongodb")
     return {
