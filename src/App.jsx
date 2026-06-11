@@ -146,7 +146,7 @@ function App() {
 
   const fetchUserInfo = useCallback(async () => {
     try {
-      const userData = await apiRequest(API_BASE, "/auth/me", {
+      const userData = await apiRequest(API_BASE, "/api/auth/me", {
         token,
       });
       setServiceHealth("api", "up");
