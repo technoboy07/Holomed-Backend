@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Viewer from "./Viewer";
 import CutawayViewer from "./CutawayViewer";
 export default function BrainScreen({ apiRoot, onClose, tumorDisplayMode }) {
-  const brainUrl = useMemo(() => `${apiRoot}/ai-output/brain.glb`, [apiRoot]);
-  const tumorUrl = useMemo(() => `${apiRoot}/ai-output/tumor.glb`, [apiRoot]);
+  const brainUrl = useMemo(() => "/brain.glb");
+  const tumorUrl = useMemo(() => "/tumor.glb" );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [brainBlobUrl, setBrainBlobUrl] = useState(null);
+  const [brainBlobUrl, setBrainBlobUrl] = useState(null); 
   const [tumorBlobUrl, setTumorBlobUrl] = useState(null);
   const [mode, setMode] = useState("cutaway"); // "cutaway" | "normal"
 

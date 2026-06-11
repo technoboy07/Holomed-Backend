@@ -499,8 +499,8 @@ function App() {
       setCutawayEnabled(false);
 
       const [brainRes, tumorRes] = await Promise.all([
-        fetch(`${AI_OUTPUT_BASE}/brain.glb`),
-        fetch(`${AI_OUTPUT_BASE}/tumor.glb`),
+        fetch(`/brain.glb`),
+        fetch(`/tumor.glb`),
       ]);
 
       if (!brainRes.ok) {
